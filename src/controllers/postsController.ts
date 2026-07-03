@@ -39,6 +39,9 @@ export async function createPost(req: AuthRequest, res: Response): Promise<void>
     )
   ).filter((url): url is string => url !== null);
 
+  const postUser = await User.findById(req.userId).lean();
+  const defaultVisibility = (postUser as any)?.settings?.defaultPostVisibility ?? 'public';
+
   const post = await Post.create({
     userId: req.userId,
     petId: petId || undefined,
@@ -46,6 +49,7 @@ export async function createPost(req: AuthRequest, res: Response): Promise<void>
     hashtags,
     withPets,
     images: imageUrls,
+    visibility: defaultVisibility,
     status: 'active',
     metrics: { likesCount: 0, commentsCount: 0 },
   });
@@ -64,7 +68,11 @@ export async function getPosts(req: AuthRequest, res: Response): Promise<void> {
   const sort   = req.query.sort === 'hot' ? 'hot' : 'new';
 
   const filter: Record<string, any> = { status: 'active' };
-  if (req.query.userId === 'me') filter.userId = req.userId;
+  if (req.query.userId === 'me') {
+    filter.userId = req.userId;
+  } else {
+    filter.visibility = { $ne: 'private' };
+  }
 
   let posts: any[];
 

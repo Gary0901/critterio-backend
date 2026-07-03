@@ -14,6 +14,9 @@ export interface IUser extends Document {
     avatarUrl?: string;
     lastNameChangedAt?: Date;
   };
+  settings?: {
+    defaultPostVisibility?: 'public' | 'private';
+  };
   pushToken?: string;
   lastActiveAt?: Date;
   createdAt: Date;
@@ -34,6 +37,9 @@ const UserSchema = new Schema<IUser>(
       name: { type: String, required: true },
       avatarUrl: { type: String },
       lastNameChangedAt: { type: Date },
+    },
+    settings: {
+      defaultPostVisibility: { type: String, enum: ['public', 'private'], default: 'public' },
     },
     pushToken: { type: String },
     lastActiveAt: { type: Date, index: true },

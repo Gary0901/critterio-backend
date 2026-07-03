@@ -22,6 +22,7 @@ function formatUser(user: any) {
     email: user.email,
     avatarUrl: user.profile.avatarUrl ?? null,
     lastNameChangedAt: user.profile.lastNameChangedAt ?? null,
+    defaultPostVisibility: user.settings?.defaultPostVisibility ?? 'public',
   };
 }
 
@@ -124,8 +125,10 @@ export async function forgotPassword(req: Request, res: Response): Promise<void>
   const scheme = process.env.APP_SCHEME ?? 'critterio';
   const resetLink = `${scheme}://reset-password?token=${rawToken}`;
 
+  const fromEmail = process.env.RESEND_FROM_EMAIL ?? 'Critterio <onboarding@resend.dev>';
+
   const { error: sendError } = await resend.emails.send({
-    from: 'Critterio <onboarding@resend.dev>',
+    from: fromEmail,
     to: user.email!,
     subject: '重設您的 Critterio 密碼',
     html: `
@@ -204,7 +207,7 @@ export async function changePassword(req: AuthRequest, res: Response): Promise<v
 }
 
 export async function updateProfile(req: AuthRequest, res: Response): Promise<void> {
-  const { name } = req.body;
+  const { name, defaultPostVisibility } = req.body;
   const user = await User.findById(req.userId);
   if (!user) {
     res.status(404).json({ success: false, data: null, message: '找不到使用者' });
@@ -226,6 +229,11 @@ export async function updateProfile(req: AuthRequest, res: Response): Promise<vo
 
   if (req.file) {
     user.profile.avatarUrl = await uploadImage(req.file.buffer, 'critterio/avatars');
+  }
+
+  if (defaultPostVisibility === 'public' || defaultPostVisibility === 'private') {
+    if (!user.settings) (user as any).settings = {};
+    (user as any).settings.defaultPostVisibility = defaultPostVisibility;
   }
 
   await user.save();

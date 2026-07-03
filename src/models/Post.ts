@@ -7,6 +7,7 @@ export interface IPost extends Document {
   images: string[];
   hashtags: string[];
   withPets: string[];
+  visibility: 'public' | 'private';
   status: 'active' | 'hidden';
   metrics: {
     likesCount: number;
@@ -24,6 +25,7 @@ const PostSchema = new Schema<IPost>(
     images:   [{ type: String }],
     hashtags: [{ type: String }],
     withPets: [{ type: String }],
+    visibility: { type: String, enum: ['public', 'private'], default: 'public' },
     status:   { type: String, enum: ['active', 'hidden'], default: 'active' },
     metrics: {
       likesCount:    { type: Number, default: 0 },

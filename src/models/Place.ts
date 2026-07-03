@@ -9,6 +9,7 @@ export interface IPlace extends Document {
   ratingCount?: number;
   weekdayHours?: string[];
   photoRefs?: string[];
+  photoUrls?: string[];
   website?: string;
   googlePlaceId?: string;
   enriched?: boolean;
@@ -27,6 +28,7 @@ const PlaceSchema = new Schema<IPlace>({
   ratingCount:   { type: Number },
   weekdayHours:  { type: [String] },
   photoRefs:     { type: [String] },
+  photoUrls:     { type: [String] },
   website:       { type: String },
   googlePlaceId: { type: String },
   enriched:      { type: Boolean },

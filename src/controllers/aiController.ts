@@ -81,17 +81,18 @@ export async function sendMessage(req: AuthRequest, res: Response): Promise<void
     return;
   }
 
-  const { content } = req.body;
-  if (!content && !req.file) {
+  const { content, imageBase64, imageMimeType } = req.body;
+  if (!content && !req.file && !imageBase64) {
     res.status(400).json({ success: false, data: null, message: 'content 或圖片為必填' });
     return;
   }
 
-  // 上傳圖片到 Cloudinary
+  // 上傳圖片到 Cloudinary（支援 file upload 和 base64 兩種方式）
   let imageUrl: string | undefined;
-  if (req.file) {
+  const imageBuffer = req.file?.buffer ?? (imageBase64 ? Buffer.from(imageBase64, 'base64') : undefined);
+  if (imageBuffer) {
     try {
-      imageUrl = await uploadImage(req.file.buffer, 'ai-chat');
+      imageUrl = await uploadImage(imageBuffer, 'ai-chat');
     } catch {
       // 上傳失敗時繼續，只發文字
     }

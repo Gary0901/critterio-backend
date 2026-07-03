@@ -42,6 +42,7 @@ export async function searchNearby(req: AuthRequest, res: Response): Promise<voi
     phone: p.phone ?? undefined,
     rating: p.rating ?? undefined,
     weekdayHours: p.weekdayHours?.length ? p.weekdayHours : undefined,
+    photoUrl: p.photoUrls?.[0] ?? undefined,
     photoRef: p.photoRefs?.[0] ?? undefined,
   }));
   res.json({ success: true, data, message: '' });
@@ -108,6 +109,7 @@ export async function getFavorites(req: AuthRequest, res: Response): Promise<voi
         phone: p.phone ?? undefined,
         rating: p.rating ?? undefined,
         weekdayHours: p.weekdayHours?.length ? p.weekdayHours : undefined,
+        photoUrl: p.photoUrls?.[0] ?? undefined,
         photoRef: p.photoRefs?.[0] ?? undefined,
         lat: p.location.coordinates[1],
         lng: p.location.coordinates[0],
