@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, googleLogin, getMe, logout, forgotPassword, resetPassword, changePassword, updateProfile, updatePushToken, updateSettings } from '../controllers/authController';
+import { register, login, googleLogin, getMe, logout, forgotPassword, resetPassword, changePassword, updateProfile, updatePushToken, updateSettings, deleteAccount } from '../controllers/authController';
 import { requireAuth } from '../middleware/auth';
 import upload from '../middleware/upload';
 
@@ -16,5 +16,6 @@ router.patch('/password', requireAuth, changePassword);
 router.patch('/profile', requireAuth, upload.single('avatar'), updateProfile);
 router.patch('/push-token', requireAuth, updatePushToken);
 router.patch('/settings', requireAuth, updateSettings);
+router.delete('/account', requireAuth, deleteAccount);
 
 export default router;

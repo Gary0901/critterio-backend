@@ -5,6 +5,17 @@ import jwt from 'jsonwebtoken';
 import { Resend } from 'resend';
 import { OAuth2Client } from 'google-auth-library';
 import User from '../models/User';
+import Pet from '../models/Pet';
+import WeightLog from '../models/WeightLog';
+import PetLog from '../models/PetLog';
+import Post from '../models/Post';
+import Comment from '../models/Comment';
+import PostLike from '../models/PostLike';
+import PostReport from '../models/PostReport';
+import Favorite from '../models/Favorite';
+import CalendarEvent from '../models/CalendarEvent';
+import AiConversation from '../models/AiConversation';
+import Notification from '../models/Notification';
 import { AuthRequest } from '../middleware/auth';
 import { uploadImage } from '../utils/cloudinary';
 
@@ -339,4 +350,42 @@ export async function updateSettings(req: AuthRequest, res: Response): Promise<v
 
   await user.save();
   res.json({ success: true, data: formatUser(user), message: '設定已更新' });
+}
+
+export async function deleteAccount(req: AuthRequest, res: Response): Promise<void> {
+  const userId = req.userId;
+
+  const pets = await Pet.find({ userId }).select('_id').lean();
+  const petIds = pets.map((p) => p._id);
+
+  const posts = await Post.find({ userId }).select('_id').lean();
+  const postIds = posts.map((p) => p._id);
+
+  // 修正因刪除而受影響的其他人貼文的按讚/留言數
+  const myLikesOnOthers = await PostLike.find({ userId, postId: { $nin: postIds } }).select('postId').lean();
+  for (const l of myLikesOnOthers) {
+    await Post.findByIdAndUpdate(l.postId, { $inc: { 'metrics.likesCount': -1 } });
+  }
+  const myCommentsOnOthers = await Comment.find({ userId, postId: { $nin: postIds } }).select('postId').lean();
+  for (const c of myCommentsOnOthers) {
+    await Post.findByIdAndUpdate(c.postId, { $inc: { 'metrics.commentsCount': -1 } });
+  }
+
+  await Promise.all([
+    WeightLog.deleteMany({ petId: { $in: petIds } }),
+    PetLog.deleteMany({ petId: { $in: petIds } }),
+    Pet.deleteMany({ userId }),
+    Comment.deleteMany({ $or: [{ postId: { $in: postIds } }, { userId }] }),
+    PostLike.deleteMany({ $or: [{ postId: { $in: postIds } }, { userId }] }),
+    PostReport.deleteMany({ $or: [{ postId: { $in: postIds } }, { userId }] }),
+    Post.deleteMany({ userId }),
+    Favorite.deleteMany({ userId }),
+    CalendarEvent.deleteMany({ userId }),
+    AiConversation.deleteMany({ userId }),
+    Notification.deleteMany({ userId }),
+  ]);
+
+  await User.findByIdAndDelete(userId);
+
+  res.json({ success: true, data: null, message: '帳號已刪除' });
 }
