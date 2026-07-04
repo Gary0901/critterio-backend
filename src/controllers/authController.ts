@@ -3,11 +3,19 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { Resend } from 'resend';
+import { OAuth2Client } from 'google-auth-library';
 import User from '../models/User';
 import { AuthRequest } from '../middleware/auth';
 import { uploadImage } from '../utils/cloudinary';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+// 可能有 iOS / Android / Web 多組 Client ID，逗號分隔
+const GOOGLE_CLIENT_IDS = (process.env.GOOGLE_OAUTH_CLIENT_IDS ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const googleClient = new OAuth2Client();
 
 function signToken(userId: string): string {
   return jwt.sign({ userId }, process.env.JWT_SECRET!, {
@@ -87,6 +95,58 @@ export async function login(req: Request, res: Response): Promise<void> {
   if (!isMatch) {
     res.status(401).json({ success: false, data: null, message: 'Email 或密碼錯誤' });
     return;
+  }
+
+  const token = signToken(String(user._id));
+  res.json({ success: true, data: { token, user: formatUser(user) }, message: '登入成功' });
+}
+
+export async function googleLogin(req: Request, res: Response): Promise<void> {
+  const { idToken } = req.body;
+  if (!idToken) {
+    res.status(400).json({ success: false, data: null, message: 'idToken 為必填' });
+    return;
+  }
+  if (GOOGLE_CLIENT_IDS.length === 0) {
+    res.status(500).json({ success: false, data: null, message: '伺服器尚未設定 Google 登入' });
+    return;
+  }
+
+  let payload;
+  try {
+    const ticket = await googleClient.verifyIdToken({ idToken, audience: GOOGLE_CLIENT_IDS });
+    payload = ticket.getPayload();
+  } catch {
+    res.status(401).json({ success: false, data: null, message: 'Google 驗證失敗' });
+    return;
+  }
+
+  if (!payload?.sub || !payload.email) {
+    res.status(401).json({ success: false, data: null, message: 'Google 驗證失敗' });
+    return;
+  }
+
+  const googleId = payload.sub;
+  const email = payload.email.toLowerCase();
+  const name = payload.name ?? email.split('@')[0];
+
+  let user = await User.findOne({ 'authProviders.googleId': googleId });
+
+  if (!user) {
+    // 若此 Email 已用密碼註冊過，直接連結帳號
+    user = await User.findOne({ email });
+    if (user) {
+      user.authProviders.googleId = googleId;
+      await user.save();
+    }
+  }
+
+  if (!user) {
+    user = await User.create({
+      email,
+      authProviders: { googleId },
+      profile: { name },
+    });
   }
 
   const token = signToken(String(user._id));
