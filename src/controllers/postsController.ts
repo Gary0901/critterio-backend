@@ -202,6 +202,7 @@ export async function toggleLike(req: AuthRequest, res: Response): Promise<void>
       title: '有人對你的貼文按讚 ❤️',
       body: `${name} 喜歡你的貼文`,
       data: { postId: String(post._id) },
+      notifCategory: 'likes',
     }).catch(() => {});
   }
 }
@@ -238,6 +239,7 @@ export async function addComment(req: AuthRequest, res: Response): Promise<void>
       title: '有人留言了 💬',
       body: `${name}：${content.slice(0, 40)}`,
       data: { postId: String(post._id) },
+      notifCategory: 'comments',
     }).catch(() => {});
   }
 }

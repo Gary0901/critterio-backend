@@ -16,6 +16,12 @@ export interface IUser extends Document {
   };
   settings?: {
     defaultPostVisibility?: 'public' | 'private';
+    notifSettings?: {
+      dailyCare?: boolean;
+      calendar?: boolean;
+      likes?: boolean;
+      comments?: boolean;
+    };
   };
   pushToken?: string;
   lastActiveAt?: Date;
@@ -40,6 +46,12 @@ const UserSchema = new Schema<IUser>(
     },
     settings: {
       defaultPostVisibility: { type: String, enum: ['public', 'private'], default: 'public' },
+      notifSettings: {
+        dailyCare: { type: Boolean, default: true },
+        calendar:  { type: Boolean, default: true },
+        likes:     { type: Boolean, default: true },
+        comments:  { type: Boolean, default: true },
+      },
     },
     pushToken: { type: String },
     lastActiveAt: { type: Date, index: true },

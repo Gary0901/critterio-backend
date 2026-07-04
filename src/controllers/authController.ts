@@ -16,6 +16,7 @@ function signToken(userId: string): string {
 }
 
 function formatUser(user: any) {
+  const ns = user.settings?.notifSettings ?? {};
   return {
     id: user._id,
     name: user.profile.name,
@@ -23,6 +24,12 @@ function formatUser(user: any) {
     avatarUrl: user.profile.avatarUrl ?? null,
     lastNameChangedAt: user.profile.lastNameChangedAt ?? null,
     defaultPostVisibility: user.settings?.defaultPostVisibility ?? 'public',
+    notifSettings: {
+      dailyCare: ns.dailyCare !== false,
+      calendar:  ns.calendar  !== false,
+      likes:     ns.likes     !== false,
+      comments:  ns.comments  !== false,
+    },
   };
 }
 
@@ -244,4 +251,32 @@ export async function updatePushToken(req: AuthRequest, res: Response): Promise<
   const { token } = req.body;
   await User.findByIdAndUpdate(req.userId, { $set: { pushToken: token ?? null } });
   res.json({ success: true, data: null, message: '' });
+}
+
+export async function updateSettings(req: AuthRequest, res: Response): Promise<void> {
+  const user = await User.findById(req.userId);
+  if (!user) {
+    res.status(404).json({ success: false, data: null, message: '找不到使用者' });
+    return;
+  }
+  if (!user.settings) (user as any).settings = {};
+
+  const { notifSettings, defaultPostVisibility } = req.body;
+
+  if (defaultPostVisibility === 'public' || defaultPostVisibility === 'private') {
+    (user as any).settings.defaultPostVisibility = defaultPostVisibility;
+  }
+
+  if (notifSettings && typeof notifSettings === 'object') {
+    const allowed = ['dailyCare', 'calendar', 'likes', 'comments'] as const;
+    if (!(user as any).settings.notifSettings) (user as any).settings.notifSettings = {};
+    for (const key of allowed) {
+      if (typeof notifSettings[key] === 'boolean') {
+        (user as any).settings.notifSettings[key] = notifSettings[key];
+      }
+    }
+  }
+
+  await user.save();
+  res.json({ success: true, data: formatUser(user), message: '設定已更新' });
 }

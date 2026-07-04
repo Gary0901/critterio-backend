@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, getMe, logout, forgotPassword, resetPassword, changePassword, updateProfile, updatePushToken } from '../controllers/authController';
+import { register, login, getMe, logout, forgotPassword, resetPassword, changePassword, updateProfile, updatePushToken, updateSettings } from '../controllers/authController';
 import { requireAuth } from '../middleware/auth';
 import upload from '../middleware/upload';
 
@@ -14,5 +14,6 @@ router.get('/me', requireAuth, getMe);
 router.patch('/password', requireAuth, changePassword);
 router.patch('/profile', requireAuth, upload.single('avatar'), updateProfile);
 router.patch('/push-token', requireAuth, updatePushToken);
+router.patch('/settings', requireAuth, updateSettings);
 
 export default router;

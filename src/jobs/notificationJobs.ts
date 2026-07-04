@@ -56,6 +56,7 @@ function scheduleCalendarReminders() {
         title: `⏰ ${label}提醒`,
         body: `「${ev.title}」將在 1 小時後開始，記得準備喔！`,
         data: { eventId: String(ev._id) },
+        notifCategory: 'calendar',
       });
     }
   }, { timezone: TZ });
@@ -82,6 +83,7 @@ function scheduleAllDayReminders() {
         title: `📅 今日${label}提醒`,
         body: `「${ev.title}」是今天的全天行程，別忘了！`,
         data: { eventId: String(ev._id) },
+        notifCategory: 'calendar',
       });
     }
   }, { timezone: TZ });
@@ -117,6 +119,7 @@ function scheduleDailyMilestones() {
             title: `🎂 ${name} 生日快樂！`,
             body: `今天是 ${name} ${age > 0 ? `${age} 歲` : '的'}生日，去給牠一個大大的擁抱吧！`,
             data: { petId: String(pet._id), petName: name, kind: 'birthday' },
+            notifCategory: 'calendar',
           });
         }
       }
@@ -136,6 +139,7 @@ function scheduleDailyMilestones() {
               title: `🐾 ${name} 加入家庭 ${years} 週年！`,
               body: `與 ${name} 相伴的 ${years} 年，每一天都是珍貴的回憶 ❤️`,
               data: { petId: String(pet._id), petName: name, kind: 'anniversary', years: String(years) },
+              notifCategory: 'calendar',
             });
           }
         }
@@ -149,6 +153,7 @@ function scheduleDailyMilestones() {
             title: `${EMOJI[totalDays]} ${name} 加入家庭滿 ${totalDays} 天！`,
             body: `你們已經一起度過了 ${totalDays} 個美好的日子，繼續加油！`,
             data: { petId: String(pet._id), petName: name, kind: 'milestone_days', days: String(totalDays) },
+            notifCategory: 'calendar',
           });
         }
       }
@@ -183,6 +188,7 @@ function scheduleDailyLogReminder() {
         type: 'health_reminder',
         title: '📔 今天還沒記錄喔！',
         body: '花幾分鐘記下毛孩今天的點點滴滴，讓回憶更完整 🐾',
+        notifCategory: 'dailyCare',
       });
     }
   }, { timezone: TZ });
@@ -215,6 +221,7 @@ function scheduleWeightReminder() {
           title: `⚖️ ${pet.name} 的體重該記錄了`,
           body: `已超過 7 天沒有記錄 ${pet.name} 的體重，定期追蹤有助於健康管理！`,
           data: { petId: pet.id },
+          notifCategory: 'dailyCare',
         });
       }
     }
