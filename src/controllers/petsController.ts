@@ -3,8 +3,9 @@ import { AuthRequest } from '../middleware/auth';
 import Pet from '../models/Pet';
 import WeightLog from '../models/WeightLog';
 import PetLog from '../models/PetLog';
+import CalendarEvent from '../models/CalendarEvent';
 import mongoose from 'mongoose';
-import { uploadImage } from '../utils/cloudinary';
+import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
 import { generatePetCare } from '../utils/groq';
 
 function calcAge(birthday?: Date): number {
@@ -114,6 +115,22 @@ export async function deletePet(req: AuthRequest, res: Response): Promise<void> 
     res.status(404).json({ success: false, data: null, message: '找不到寵物' });
     return;
   }
+
+  const logs = await PetLog.find({ petId: pet._id }).select('images').lean();
+  const logImageUrls = logs.flatMap((l) => (l.images ?? []).map((img: any) => img.url));
+
+  await Promise.all([
+    WeightLog.deleteMany({ petId: pet._id }),
+    PetLog.deleteMany({ petId: pet._id }),
+    CalendarEvent.deleteMany({ petId: pet._id }),
+    ...logImageUrls.map((url) => deleteImageByUrl(url).catch((e) =>
+      console.error(`[deletePet] 日誌圖片刪除失敗，petId=${pet._id}`, e)
+    )),
+    ...(pet.photoUrl ? [deleteImageByUrl(pet.photoUrl).catch((e) =>
+      console.error(`[deletePet] 頭像刪除失敗，petId=${pet._id}`, e)
+    )] : []),
+  ]);
+
   res.json({ success: true, data: null, message: '寵物檔案已刪除' });
 }
 
