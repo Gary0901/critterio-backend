@@ -5,7 +5,7 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 export interface AiCareSuggestion {
   label: string;
   target: string;
-  category: 'food' | 'activity' | 'grooming' | 'play' | 'health' | 'other';
+  category: 'food' | 'activity' | 'grooming' | 'play' | 'health' | 'environment' | 'other';
 }
 
 export interface AiCareResult {
@@ -92,7 +92,7 @@ export async function generatePetCare(pet: {
 
   const jsonShape = `{
   "suggestions": [
-    { "label": "項目名稱（2-4字）", "target": "含具體數字或頻率的目標（12字內）", "category": "activity|food|grooming|play|health|other 其中一個" }
+    { "label": "項目名稱（2-4字）", "target": "含具體數字或頻率的目標（12字內）", "category": "activity|food|grooming|play|health|environment|other 其中一個" }
   ],
   "idealWeightMin": 數字,
   "idealWeightMax": 數字,
@@ -142,9 +142,9 @@ ${jsonShape}
 requirements:
 - suggestions 必須包含 5 個項目，且必須符合這個物種真實的飼養方式：
   1. 餵食（category: food）：依這個物種實際的餵食頻率與份量給出建議（不一定是「每日」）
-  2. 補水或環境濕度（category: food 或 other）：依這個物種實際的補水/濕度需求給出建議
+  2. 補水或環境濕度（category: environment）：依這個物種實際的補水/濕度需求給出建議
   3. 活動或環境豐富化（category: activity 或 play）：依該物種習性給出具體建議
-  4. 環境或清潔（category: grooming 或 other）：例如溫度、UVB 燈光、底材更換、脫皮協助等，依物種決定
+  4. 環境或清潔（category: environment）：例如溫度、UVB 燈光、底材更換、脫皮協助等，依物種決定
   5. 健康檢查（category: health）：依該物種常見好發疾病給出具體檢查項目與頻率
 - idealWeight/Height 依該物種/品種常態給出合理範圍（若該物種沒有明確身高概念，可用體型/體長估計值替代）
 - 如果品種欄位無法判斷具體物種，依「其他」與現有資訊盡力給出保守、安全的通用建議`;
