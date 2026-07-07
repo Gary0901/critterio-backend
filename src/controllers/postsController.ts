@@ -9,6 +9,8 @@ import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
 import { sendNotification } from '../utils/push';
 
 const REPORT_HIDE_THRESHOLD = 5;
+const POST_TYPES = ['question', 'meetup', 'share'] as const;
+type PostType = typeof POST_TYPES[number];
 
 async function populateUser(userId: any) {
   const user = await User.findById(userId).lean();
@@ -19,11 +21,13 @@ async function populateUser(userId: any) {
 // ─── Posts ────────────────────────────────────────────────────────────────────
 
 export async function createPost(req: AuthRequest, res: Response): Promise<void> {
-  const { content, petId, hashtags: hashtagsRaw, withPets: withPetsRaw } = req.body;
+  const { content, petId, hashtags: hashtagsRaw, withPets: withPetsRaw, postType: postTypeRaw } = req.body;
   if (!content) {
     res.status(400).json({ success: false, data: null, message: 'content 為必填' });
     return;
   }
+
+  const postType: PostType = POST_TYPES.includes(postTypeRaw) ? postTypeRaw : 'share';
 
   let hashtags: string[] = [];
   let withPets: string[] = [];
@@ -48,6 +52,7 @@ export async function createPost(req: AuthRequest, res: Response): Promise<void>
     content,
     hashtags,
     withPets,
+    postType,
     images: imageUrls,
     visibility: defaultVisibility,
     status: 'active',
@@ -56,7 +61,7 @@ export async function createPost(req: AuthRequest, res: Response): Promise<void>
   const user = await populateUser(req.userId);
   res.status(201).json({
     success: true,
-    data: { id: post._id, content: post.content, images: post.images, hashtags: post.hashtags, withPets: post.withPets, createdAt: post.createdAt, user },
+    data: { id: post._id, content: post.content, images: post.images, hashtags: post.hashtags, withPets: post.withPets, postType: post.postType, createdAt: post.createdAt, user },
     message: '發布成功',
   });
 }
@@ -72,6 +77,9 @@ export async function getPosts(req: AuthRequest, res: Response): Promise<void> {
     filter.userId = req.userId;
   } else {
     filter.visibility = { $ne: 'private' };
+  }
+  if (POST_TYPES.includes(req.query.postType as PostType)) {
+    filter.postType = req.query.postType;
   }
 
   let posts: any[];
@@ -126,6 +134,7 @@ export async function getPosts(req: AuthRequest, res: Response): Promise<void> {
       images: p.images,
       hashtags: p.hashtags ?? [],
       withPets: p.withPets ?? [],
+      postType: p.postType ?? 'share',
       metrics: p.metrics,
       isLiked: likedSet.has(String(p._id)),
       createdAt: p.createdAt,
@@ -153,6 +162,7 @@ export async function getPost(req: AuthRequest, res: Response): Promise<void> {
     data: {
       id: post._id, content: post.content, images: post.images,
       hashtags: (post as any).hashtags ?? [], withPets: (post as any).withPets ?? [],
+      postType: (post as any).postType ?? 'share',
       metrics: post.metrics, isLiked: !!myLike,
       user: await populateUser(post.userId),
       comments: commentsWithUser, createdAt: post.createdAt,

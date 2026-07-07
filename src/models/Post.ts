@@ -7,6 +7,7 @@ export interface IPost extends Document {
   images: string[];
   hashtags: string[];
   withPets: string[];
+  postType: 'question' | 'meetup' | 'share';
   visibility: 'public' | 'private';
   status: 'active' | 'hidden';
   metrics: {
@@ -25,6 +26,7 @@ const PostSchema = new Schema<IPost>(
     images:   [{ type: String }],
     hashtags: [{ type: String }],
     withPets: [{ type: String }],
+    postType: { type: String, enum: ['question', 'meetup', 'share'], default: 'share' },
     visibility: { type: String, enum: ['public', 'private'], default: 'public' },
     status:   { type: String, enum: ['active', 'hidden'], default: 'active' },
     metrics: {
