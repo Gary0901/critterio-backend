@@ -9,7 +9,7 @@ const GOOGLE_KEY = process.env.GOOGLE_GEOCODING_KEY ?? '';
 // ─── Places ───────────────────────────────────────────────────────────────────
 
 export async function searchNearby(req: AuthRequest, res: Response): Promise<void> {
-  const { lat, lng, type, radius = '5000', is24hr } = req.query as Record<string, string>;
+  const { lat, lng, type, radius = '5000', is24hr, exoticFriendly } = req.query as Record<string, string>;
   if (!lat || !lng) {
     res.status(400).json({ success: false, data: null, message: 'lat 與 lng 為必填' });
     return;
@@ -24,6 +24,7 @@ export async function searchNearby(req: AuthRequest, res: Response): Promise<voi
   };
   if (type) filter.type = type;
   if (is24hr === 'true') filter.is24Hours = true;
+  if (exoticFriendly === 'true') filter.exoticFriendly = true;
 
   const places = await Place.find(filter).limit(100).lean();
 
@@ -44,6 +45,7 @@ export async function searchNearby(req: AuthRequest, res: Response): Promise<voi
     rating: p.rating ?? undefined,
     weekdayHours: p.weekdayHours?.length ? p.weekdayHours : undefined,
     is24Hours: p.is24Hours ?? false,
+    exoticFriendly: p.exoticFriendly ?? false,
     photoUrl: p.photoUrls?.[0] ?? undefined,
     photoRef: p.photoRefs?.[0] ?? undefined,
   }));
@@ -112,6 +114,7 @@ export async function getFavorites(req: AuthRequest, res: Response): Promise<voi
         rating: p.rating ?? undefined,
         weekdayHours: p.weekdayHours?.length ? p.weekdayHours : undefined,
         is24Hours: p.is24Hours ?? false,
+        exoticFriendly: p.exoticFriendly ?? false,
         photoUrl: p.photoUrls?.[0] ?? undefined,
         photoRef: p.photoRefs?.[0] ?? undefined,
         lat: p.location.coordinates[1],
