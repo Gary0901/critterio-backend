@@ -312,6 +312,7 @@ export async function updateProfile(req: AuthRequest, res: Response): Promise<vo
   if (defaultPostVisibility === 'public' || defaultPostVisibility === 'private') {
     if (!user.settings) (user as any).settings = {};
     (user as any).settings.defaultPostVisibility = defaultPostVisibility;
+    await Post.updateMany({ userId: user._id }, { $set: { visibility: defaultPostVisibility } });
   }
 
   await user.save();
@@ -336,6 +337,7 @@ export async function updateSettings(req: AuthRequest, res: Response): Promise<v
 
   if (defaultPostVisibility === 'public' || defaultPostVisibility === 'private') {
     (user as any).settings.defaultPostVisibility = defaultPostVisibility;
+    await Post.updateMany({ userId: user._id }, { $set: { visibility: defaultPostVisibility } });
   }
 
   if (notifSettings && typeof notifSettings === 'object') {

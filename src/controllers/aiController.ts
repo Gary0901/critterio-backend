@@ -93,8 +93,8 @@ export async function sendMessage(req: AuthRequest, res: Response): Promise<void
   if (imageBuffer) {
     try {
       imageUrl = await uploadImage(imageBuffer, 'ai-chat');
-    } catch {
-      // 上傳失敗時繼續，只發文字
+    } catch (e) {
+      console.error(`[aiController] Cloudinary 上傳失敗，改為僅送文字。conversationId=${conv._id}`, e);
     }
   }
 
