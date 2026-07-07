@@ -8,6 +8,7 @@ export interface IPlace extends Document {
   rating?: number;
   ratingCount?: number;
   weekdayHours?: string[];
+  is24Hours?: boolean;
   photoRefs?: string[];
   photoUrls?: string[];
   website?: string;
@@ -27,6 +28,7 @@ const PlaceSchema = new Schema<IPlace>({
   rating:        { type: Number },
   ratingCount:   { type: Number },
   weekdayHours:  { type: [String] },
+  is24Hours:     { type: Boolean, default: false },
   photoRefs:     { type: [String] },
   photoUrls:     { type: [String] },
   website:       { type: String },
