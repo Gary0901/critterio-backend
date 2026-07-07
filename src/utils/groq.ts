@@ -66,7 +66,7 @@ export async function generatePetCare(pet: {
   heightCm: number;
 }): Promise<AiCareResult> {
   const speciesMap: Record<string, string> = {
-    dog: '狗', cat: '貓', rabbit: '兔子', small: '小動物', other: '其他',
+    dog: '狗', cat: '貓', rabbit: '兔子', small: '小動物', bird: '鳥類', reptile: '爬蟲類', other: '其他',
   };
   const genderMap: Record<string, string> = { male: '公', female: '母' };
 

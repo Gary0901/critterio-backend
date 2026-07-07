@@ -10,7 +10,7 @@ interface CareTarget {
 export interface IPet extends Document {
   userId: mongoose.Types.ObjectId;
   name: string;
-  species: 'dog' | 'cat' | 'rabbit' | 'small' | 'other';
+  species: 'dog' | 'cat' | 'rabbit' | 'small' | 'bird' | 'reptile' | 'other';
   breed: string;
   birthday?: Date;
   joinedFamilyAt?: Date;
@@ -28,7 +28,7 @@ const PetSchema = new Schema<IPet>(
   {
     userId:   { type: Schema.Types.ObjectId, ref: 'User', required: true },
     name:     { type: String, required: true },
-    species:  { type: String, enum: ['dog', 'cat', 'rabbit', 'small', 'other'], required: true },
+    species:  { type: String, enum: ['dog', 'cat', 'rabbit', 'small', 'bird', 'reptile', 'other'], required: true },
     breed:    { type: String, default: '' },
     birthday:       { type: Date },
     joinedFamilyAt: { type: Date },
