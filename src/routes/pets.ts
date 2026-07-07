@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth';
 import upload from '../middleware/upload';
 import {
-  createPet, getPets, getPet, updatePet, deletePet, updateCareTargets,
+  createPet, getPets, getPet, updatePet, deletePet, updateCareTargets, reorderPets,
   addWeightLog, getWeightLogs,
   addPetLog, getPetLogs, deletePetLog,
   getAiCare,
@@ -13,6 +13,7 @@ router.use(requireAuth);
 
 router.post('/', upload.single('photo'), createPet);
 router.get('/', getPets);
+router.patch('/reorder', reorderPets);
 router.get('/:id', getPet);
 router.patch('/:id', upload.single('photo'), updatePet);
 router.delete('/:id', deletePet);

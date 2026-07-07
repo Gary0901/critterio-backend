@@ -20,6 +20,7 @@ export interface IPet extends Document {
   photoUrl?: string;
   traits: string[];
   careTargets: CareTarget[];
+  order: number;
   createdAt: Date;
 }
 
@@ -36,6 +37,7 @@ const PetSchema = new Schema<IPet>(
     heightCm: { type: Number, default: 0 },
     photoUrl: { type: String },
     traits:   [{ type: String }],
+    order:    { type: Number, default: 0 },
     careTargets: [
       {
         title:    { type: String, required: true },

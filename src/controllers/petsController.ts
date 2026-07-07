@@ -67,13 +67,31 @@ export async function createPet(req: AuthRequest, res: Response): Promise<void> 
     photoUrl,
     traits: [],
     careTargets: [],
+    order: petCount,
   });
   res.status(201).json({ success: true, data: formatPet(pet), message: '建立成功' });
 }
 
 export async function getPets(req: AuthRequest, res: Response): Promise<void> {
-  const pets = await Pet.find({ userId: req.userId }).sort({ createdAt: 1 });
+  const pets = await Pet.find({ userId: req.userId }).sort({ order: 1, createdAt: 1 });
   res.json({ success: true, data: pets.map(formatPet), message: '' });
+}
+
+export async function reorderPets(req: AuthRequest, res: Response): Promise<void> {
+  const { petIds } = req.body;
+  if (!Array.isArray(petIds) || petIds.some((id) => typeof id !== 'string')) {
+    res.status(400).json({ success: false, data: null, message: 'petIds 必須為字串陣列' });
+    return;
+  }
+  await Pet.bulkWrite(
+    petIds.map((id, index) => ({
+      updateOne: {
+        filter: { _id: id, userId: req.userId },
+        update: { $set: { order: index } },
+      },
+    }))
+  );
+  res.json({ success: true, data: null, message: '排序已更新' });
 }
 
 export async function getPet(req: AuthRequest, res: Response): Promise<void> {
