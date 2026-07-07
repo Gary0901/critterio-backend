@@ -20,3 +20,10 @@ export async function uploadImage(
     ).end(buffer);
   });
 }
+
+// 從 Cloudinary secure_url 還原 public_id 並刪除該圖片
+export async function deleteImageByUrl(url: string): Promise<void> {
+  const match = url.match(/\/upload\/(?:v\d+\/)?(.+)\.\w+$/);
+  if (!match) return;
+  await cloudinary.uploader.destroy(match[1]);
+}

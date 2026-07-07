@@ -5,7 +5,7 @@ import Comment from '../models/Comment';
 import PostLike from '../models/PostLike';
 import PostReport from '../models/PostReport';
 import User from '../models/User';
-import { uploadImage } from '../utils/cloudinary';
+import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
 import { sendNotification } from '../utils/push';
 
 const REPORT_HIDE_THRESHOLD = 5;
@@ -167,6 +167,16 @@ export async function deletePost(req: AuthRequest, res: Response): Promise<void>
     res.status(404).json({ success: false, data: null, message: '找不到貼文或無權限刪除' });
     return;
   }
+
+  await Promise.all([
+    Comment.deleteMany({ postId: post._id }),
+    PostLike.deleteMany({ postId: post._id }),
+    PostReport.deleteMany({ postId: post._id }),
+    ...post.images.map((url) => deleteImageByUrl(url).catch((e) =>
+      console.error(`[deletePost] Cloudinary 圖片刪除失敗，postId=${post._id}`, e)
+    )),
+  ]);
+
   res.json({ success: true, data: null, message: '貼文已刪除' });
 }
 
