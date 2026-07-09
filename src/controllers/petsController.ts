@@ -281,7 +281,7 @@ export async function getAiCare(req: AuthRequest, res: Response): Promise<void> 
     });
     res.json({ success: true, data: result, message: '' });
   } catch (err) {
-    console.error('[Gemini] 生成照護建議失敗:', err);
+    console.error('[Groq] 生成照護建議失敗:', err);
     res.status(500).json({ success: false, data: null, message: 'AI 建議生成失敗，請稍後再試' });
   }
 }
