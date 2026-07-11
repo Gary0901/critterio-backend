@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth';
 import upload from '../middleware/upload';
+import { aiLimiter } from '../middleware/rateLimit';
 import {
   createPet, getPets, getPet, updatePet, deletePet, updateCareTargets, reorderPets,
   addWeightLog, getWeightLogs,
@@ -19,7 +20,7 @@ router.patch('/:id', upload.single('photo'), updatePet);
 router.delete('/:id', deletePet);
 router.put('/:id/care-targets', updateCareTargets);
 
-router.get('/:id/ai-care', getAiCare);
+router.get('/:id/ai-care', aiLimiter, getAiCare);
 router.post('/:id/weight-logs', addWeightLog);
 router.get('/:id/weight-logs', getWeightLogs);
 
