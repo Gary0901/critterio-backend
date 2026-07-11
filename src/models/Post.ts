@@ -22,7 +22,7 @@ const PostSchema = new Schema<IPost>(
   {
     userId:  { type: Schema.Types.ObjectId, ref: 'User', required: true },
     petId:   { type: Schema.Types.ObjectId, ref: 'Pet' },
-    content:  { type: String, required: true },
+    content:  { type: String, default: '' },
     images:   [{ type: String }],
     hashtags: [{ type: String }],
     withPets: [{ type: String }],

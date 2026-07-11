@@ -22,8 +22,9 @@ async function populateUser(userId: any) {
 
 export async function createPost(req: AuthRequest, res: Response): Promise<void> {
   const { content, petId, hashtags: hashtagsRaw, withPets: withPetsRaw, postType: postTypeRaw } = req.body;
-  if (!content) {
-    res.status(400).json({ success: false, data: null, message: 'content 為必填' });
+  const files = (req.files ?? []) as Express.Multer.File[];
+  if (!content && files.length === 0) {
+    res.status(400).json({ success: false, data: null, message: '請輸入文字或至少上傳一張照片' });
     return;
   }
 
@@ -34,7 +35,6 @@ export async function createPost(req: AuthRequest, res: Response): Promise<void>
   try { hashtags = hashtagsRaw ? JSON.parse(hashtagsRaw) : []; } catch {}
   try { withPets = withPetsRaw ? JSON.parse(withPetsRaw) : []; } catch {}
 
-  const files = (req.files ?? []) as Express.Multer.File[];
   const imageUrls = (
     await Promise.all(
       files.map(async (file) => {
