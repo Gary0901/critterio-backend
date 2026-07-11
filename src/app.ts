@@ -31,6 +31,11 @@ app.use('/api/v1/calendar', calendarRoutes);
 app.use('/api/v1/notifications', notificationsRoutes);
 app.use('/api/v1/admin', adminRoutes);
 
+// TEMP：驗證正式環境 Sentry 是否正常運作，確認後就刪掉
+app.get('/debug-sentry', () => {
+  throw new Error('Backend Sentry production test');
+});
+
 // 要接在所有路由之後、才能捕捉到 controller 裡沒被 catch 到的錯誤
 Sentry.setupExpressErrorHandler(app);
 
