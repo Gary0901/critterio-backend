@@ -1,4 +1,5 @@
-import 'dotenv/config';
+import './instrument';
+import * as Sentry from '@sentry/node';
 import express from 'express';
 import cors from 'cors';
 import { connectDB } from './config/db';
@@ -29,6 +30,9 @@ app.use('/api/v1/map', mapRoutes);
 app.use('/api/v1/calendar', calendarRoutes);
 app.use('/api/v1/notifications', notificationsRoutes);
 app.use('/api/v1/admin', adminRoutes);
+
+// 要接在所有路由之後、才能捕捉到 controller 裡沒被 catch 到的錯誤
+Sentry.setupExpressErrorHandler(app);
 
 app.get('/health', (_req, res) => {
   res.json({ success: true, data: null, message: 'Server is running' });

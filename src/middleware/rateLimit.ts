@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { Request } from 'express';
 import { AuthRequest } from './auth';
 
@@ -26,6 +26,6 @@ export const aiLimiter = rateLimit({
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: Request) => (req as AuthRequest).userId ?? req.ip ?? 'unknown',
+  keyGenerator: (req: Request) => (req as AuthRequest).userId ?? ipKeyGenerator(req.ip ?? 'unknown'),
   message: { success: false, data: null, message: 'AI 對話次數已達上限，請稍後再試' },
 });
