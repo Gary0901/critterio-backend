@@ -12,6 +12,9 @@ import { uploadImage } from '../utils/cloudinary';
 
 const KNOWLEDGE_VECTOR_INDEX = 'knowledge_vector_index';
 const EMBEDDING_MODEL = 'text-embedding-3-small';
+// AAV 文章多半是主題文（洗澡/換羽/斷奶等），不特定物種的歸在 general_bird；
+// 查詢鳥類物種時要一併納入 general_bird，不然會漏掉這些其實相關的文章
+const BIRD_SPECIES = new Set(['parrot', 'duck', 'poultry', 'pigeon', 'general_bird']);
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -130,7 +133,9 @@ async function searchKnowledgeBase(query: string, species?: string): Promise<unk
         queryVector,
         numCandidates: 100,
         limit: 5,
-        ...(species ? { filter: { species } } : {}),
+        ...(species
+          ? { filter: { species: BIRD_SPECIES.has(species) ? { $in: [species, 'general_bird'] } : species } }
+          : {}),
       },
     },
     { $project: { _id: 0, source: 1, sourceTitle: 1, species: 1, text: 1 } },
