@@ -7,7 +7,11 @@ import Pet from '../models/Pet';
 import WeightLog from '../models/WeightLog';
 import PetLog from '../models/PetLog';
 import CalendarEvent from '../models/CalendarEvent';
+import KnowledgeChunk from '../models/KnowledgeChunk';
 import { uploadImage } from '../utils/cloudinary';
+
+const KNOWLEDGE_VECTOR_INDEX = 'knowledge_vector_index';
+const EMBEDDING_MODEL = 'text-embedding-3-small';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -45,9 +49,13 @@ const PET_DATA_TOOL_GUIDANCE = `
 
 你可以透過提供的工具查詢這隻寵物在 App 內的真實紀錄（體重歷史、每日照護日誌、回診/疫苗/驅蟲/美容行事曆）。當使用者的問題可能跟這些紀錄有關（例如體重變化、最近吃過什麼藥、上次回診時間、症狀從什麼時候開始），請主動呼叫對應工具取得真實資料再回答，不要憑空猜測或只依賴使用者口述。若工具回傳空結果，如實告知使用者目前沒有相關紀錄，不要編造。`;
 
+const KNOWLEDGE_TOOL_GUIDANCE = `
+
+你也可以透過 search_species_knowledge_base 工具查詢權威獸醫學會（AAV 鳥類獸醫協會、ARAV 爬蟲兩棲獸醫協會）的照護文獻。當使用者詢問鳥類或爬蟲類/兩棲類的專業照護問題（例如特定物種的飼養環境、疾病徵兆、飲食轉換、行為問題）時，請主動查詢並在回答中反映文獻內容，讓建議更有根據。查詢不到相關文獻時，依你原有的專業知識回答即可，不用勉強引用。`;
+
 // ─── Pet 資料查詢工具（function calling）──────────────────────────────────────────
 
-const PET_DATA_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+const PET_RECORD_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
@@ -90,10 +98,51 @@ const PET_DATA_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ];
 
+// ─── 獸醫學知識庫查詢工具（不需綁定寵物，鳥類/爬蟲類問題都能用）───────────────────────────
+
+const KNOWLEDGE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'search_species_knowledge_base',
+      description: '在權威獸醫學會文獻庫（AAV 鳥類、ARAV 爬蟲兩棲類）中搜尋跟問題相關的段落，取得比一般知識更專業、更有根據的照護資訊。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '要搜尋的問題或關鍵字，用英文描述搜尋效果較好（例如 "bearded dragon UVB lighting requirements"）' },
+          species: { type: 'string', description: '若已知明確物種可帶入英文物種代碼縮小範圍（例如 bearded_dragon、leopard_gecko、parrot），不確定就留空搜全部' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+];
+
+async function searchKnowledgeBase(query: string, species?: string): Promise<unknown> {
+  const embeddingRes = await openai.embeddings.create({ model: EMBEDDING_MODEL, input: query });
+  const queryVector = embeddingRes.data[0].embedding;
+
+  const results = await KnowledgeChunk.aggregate([
+    {
+      $vectorSearch: {
+        index: KNOWLEDGE_VECTOR_INDEX,
+        path: 'embedding',
+        queryVector,
+        numCandidates: 100,
+        limit: 5,
+        ...(species ? { filter: { species } } : {}),
+      },
+    },
+    { $project: { _id: 0, source: 1, sourceTitle: 1, species: 1, text: 1 } },
+  ]);
+
+  return results;
+}
+
 async function executeTool(
   name: string,
   args: Record<string, unknown>,
-  petId: mongoose.Types.ObjectId
+  petId?: mongoose.Types.ObjectId
 ): Promise<unknown> {
   switch (name) {
     case 'get_weight_history': {
@@ -121,6 +170,11 @@ async function executeTool(
       else filter.startTime = { $gte: new Date(now - days * dayMs), $lte: new Date(now + days * dayMs) };
       const events = await CalendarEvent.find(filter).sort({ startTime: 1 }).limit(30).lean();
       return events.map(e => ({ title: e.title, type: e.type, startTime: e.startTime, done: e.done, note: e.note }));
+    }
+    case 'search_species_knowledge_base': {
+      const query = String(args.query ?? '');
+      if (!query) return { error: 'query 為必填' };
+      return searchKnowledgeBase(query, args.species as string | undefined);
     }
     default:
       return { error: `unknown tool: ${name}` };
@@ -266,7 +320,8 @@ export async function sendMessage(req: AuthRequest, res: Response): Promise<void
       // invalid petId, skip
     }
   }
-  const tools = toolsPetId ? PET_DATA_TOOLS : undefined;
+  systemPrompt += KNOWLEDGE_TOOL_GUIDANCE;
+  const tools = [...(toolsPetId ? PET_RECORD_TOOLS : []), ...KNOWLEDGE_TOOLS];
 
   // 只取最近 10 則送給 GPT（支援圖片 vision）
   const context = conv.messages.slice(-10);
@@ -300,7 +355,7 @@ export async function sendMessage(req: AuthRequest, res: Response): Promise<void
       const isFinalRound = round === maxRounds - 1;
       const result = await streamChatCompletion(res, messages, isFinalRound ? undefined : tools);
 
-      if (result.finishReason === 'tool_calls' && result.toolCalls.length > 0 && !isFinalRound && toolsPetId) {
+      if (result.finishReason === 'tool_calls' && result.toolCalls.length > 0 && !isFinalRound) {
         messages = [
           ...messages,
           {
