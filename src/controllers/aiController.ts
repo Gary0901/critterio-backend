@@ -126,8 +126,6 @@ const KNOWLEDGE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
 ];
 
 async function searchKnowledgeBase(query: string, species?: string): Promise<unknown> {
-  // TEMP：驗證一般問題不會誤觸發知識庫查詢，確認完就刪掉
-  console.log(`[RAG-debug] search_species_knowledge_base 被呼叫，query="${query}" species="${species ?? ''}"`);
   const embeddingRes = await openai.embeddings.create({ model: EMBEDDING_MODEL, input: query });
   const queryVector = embeddingRes.data[0].embedding;
 
