@@ -153,10 +153,13 @@ async function executeTool(
   args: Record<string, unknown>,
   petId?: mongoose.Types.ObjectId
 ): Promise<unknown> {
+  // TEMP：診斷工具呼叫狀況，確認完就刪掉
+  console.log(`[tool-debug] 呼叫 ${name}，petId=${petId ?? 'undefined'}，args=${JSON.stringify(args)}`);
   switch (name) {
     case 'get_weight_history': {
       const limit = Math.min(Number(args.limit) || 10, 30);
       const logs = await WeightLog.find({ petId }).sort({ recordedAt: -1 }).limit(limit).lean();
+      console.log(`[tool-debug] get_weight_history 查到 ${logs.length} 筆`);
       return logs.map(l => ({ weightKg: l.weightKg, recordedAt: l.recordedAt }));
     }
     case 'get_daily_logs': {
