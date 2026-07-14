@@ -206,7 +206,6 @@ async function streamChatCompletion(
     messages,
     tools,
     stream: true,
-    stream_options: { include_usage: true },
   });
 
   let content = '';
@@ -232,13 +231,6 @@ async function streamChatCompletion(
     }
 
     if (choice?.finish_reason) finishReason = choice.finish_reason;
-
-    // TEMP：驗證 prompt caching 是否命中，確認完就刪掉
-    if (chunk.usage) {
-      console.log(
-        `[cache-debug] prompt_tokens=${chunk.usage.prompt_tokens} cached_tokens=${chunk.usage.prompt_tokens_details?.cached_tokens ?? 0}`
-      );
-    }
   }
 
   return { content, toolCalls: Object.values(toolCallsAcc), finishReason };
