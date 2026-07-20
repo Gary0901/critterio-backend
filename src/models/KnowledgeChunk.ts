@@ -1,9 +1,10 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 export interface IKnowledgeChunk extends Document {
-  source: string;       // 'AAV' | 'ARAV'
+  source: string;       // 'AAV' | 'ARAV' | 'PLOS' | 'JZAR' | 'Redalyc' | 'PMC' | 'WikiVet' | 'Gribbles' | 'Awanui'
   sourceTitle: string;  // 檔名（不含副檔名）
-  species: string;      // 例如 bearded_dragon、general_bird
+  species: string;      // 例如 bearded_dragon、general_bird、general_reptile
+  category: 'daily_care' | 'lab_interpretation'; // daily_care: 日常照護衛教；lab_interpretation: 血檢/生化數值判讀
   chunkIndex: number;
   text: string;
   embedding: number[];  // text-embedding-3-small，1536 維
@@ -15,6 +16,7 @@ const KnowledgeChunkSchema = new Schema<IKnowledgeChunk>(
     source:      { type: String, required: true },
     sourceTitle: { type: String, required: true },
     species:     { type: String, required: true, index: true },
+    category:    { type: String, enum: ['daily_care', 'lab_interpretation'], required: true, default: 'daily_care' },
     chunkIndex:  { type: Number, required: true },
     text:        { type: String, required: true },
     embedding:   { type: [Number], required: true },

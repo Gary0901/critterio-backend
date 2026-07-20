@@ -8,7 +8,8 @@ const pdfParse = require('pdf-parse');
 import OpenAI from 'openai';
 import KnowledgeChunk from '../src/models/KnowledgeChunk';
 
-const RAG_DATA_DIR = path.resolve(__dirname, '../../AI_Chat_Optimization/RAG_Data');
+const DAILY_CARE_DIR = path.resolve(__dirname, '../../AI_Chat_Optimization/RAG_Data');
+const LAB_DATA_DIR = path.resolve(__dirname, '../../AI_Chat_Optimization/vet_rag_data');
 const EMBEDDING_MODEL = 'text-embedding-3-small';
 const VECTOR_INDEX_NAME = 'knowledge_vector_index';
 
@@ -38,10 +39,40 @@ const AAV_SPECIES_MAP: Record<string, string> = {
   'Pigeon_Husbandry_Final.pdf': 'pigeon',
 };
 
+// 血檢/生化數值判讀語料，來源與內容見 AI_Chat_Optimization/vet_rag_data/SOURCES.md
+// 大多不是針對特定寵物物種撰寫（如鱷魚/眼鏡蛇論文、跨物種判讀指南），歸在 general_bird / general_reptile；
+// 陣列代表同一份文件要同時存成多個物種標籤（例如同時涵蓋鳥類與爬蟲類的跨物種指南）
+const LAB_SPECIES_MAP: Record<string, string[]> = {
+  'PLOS_duck_hematology_biochemistry.pdf': ['duck'],
+  'JZAR_eurasian_crane_hematology.pdf': ['general_bird'],
+  'Redalyc_vinaceous_amazon_hematology.pdf': ['parrot'],
+  'Gribbles_avian_biochemistry_guidelines.html': ['general_bird'],
+  'PMC_orinoco_crocodile_hematology.html': ['general_reptile'],
+  'PMC_galapagos_tortoise_hematology.html': ['general_reptile'],
+  'PMC_indian_cobra_hematology.html': ['general_reptile'],
+  'WikiVet_lizard_blood_values.html': ['general_reptile'],
+  'WikiVet_lizard_snake_biochemistry.html': ['general_reptile'],
+  'Awanui_avian_reptile_hematology_biochemistry.html': ['general_bird', 'general_reptile'],
+};
+
+const LAB_SOURCE_MAP: Record<string, string> = {
+  'PLOS_duck_hematology_biochemistry.pdf': 'PLOS',
+  'JZAR_eurasian_crane_hematology.pdf': 'JZAR',
+  'Redalyc_vinaceous_amazon_hematology.pdf': 'Redalyc',
+  'Gribbles_avian_biochemistry_guidelines.html': 'Gribbles',
+  'PMC_orinoco_crocodile_hematology.html': 'PMC',
+  'PMC_galapagos_tortoise_hematology.html': 'PMC',
+  'PMC_indian_cobra_hematology.html': 'PMC',
+  'WikiVet_lizard_blood_values.html': 'WikiVet',
+  'WikiVet_lizard_snake_biochemistry.html': 'WikiVet',
+  'Awanui_avian_reptile_hematology_biochemistry.html': 'Awanui',
+};
+
 interface PendingChunk {
   source: string;
   sourceTitle: string;
   species: string;
+  category: 'daily_care' | 'lab_interpretation';
   chunkIndex: number;
   text: string;
 }
@@ -67,9 +98,27 @@ async function extractPdfText(filePath: string): Promise<string> {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-async function collectChunks(): Promise<PendingChunk[]> {
+// 網頁類語料沒有 pdf-parse 可用，用簡單的標籤剝除取代——RAG 是拿去產生 embedding 用，
+// 不需要完美的排版還原，夠乾淨的純文字即可
+function extractHtmlText(filePath: string): string {
+  const html = fs.readFileSync(filePath, 'utf-8');
+  const withoutNonText = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  const withoutTags = withoutNonText.replace(/<[^>]+>/g, ' ');
+  const decoded = withoutTags
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'");
+  return decoded.replace(/\s+/g, ' ').trim();
+}
+
+async function collectDailyCareChunks(): Promise<PendingChunk[]> {
   const pending: PendingChunk[] = [];
-  const folders = fs.readdirSync(RAG_DATA_DIR, { withFileTypes: true }).filter(d => d.isDirectory());
+  const folders = fs.readdirSync(DAILY_CARE_DIR, { withFileTypes: true }).filter(d => d.isDirectory());
 
   for (const folder of folders) {
     const isAAV = folder.name.startsWith('AAV');
@@ -80,7 +129,7 @@ async function collectChunks(): Promise<PendingChunk[]> {
       continue;
     }
 
-    const folderPath = path.join(RAG_DATA_DIR, folder.name);
+    const folderPath = path.join(DAILY_CARE_DIR, folder.name);
     const files = fs.readdirSync(folderPath).filter(f => f.toLowerCase().endsWith('.pdf'));
 
     for (const file of files) {
@@ -103,7 +152,53 @@ async function collectChunks(): Promise<PendingChunk[]> {
       // ARAV 照護卡篇幅短，整份當一個 chunk；AAV 文章較長才切塊
       const chunks = source === 'ARAV' ? [text] : chunkByWords(text);
       chunks.forEach((chunkText, chunkIndex) => {
-        pending.push({ source, sourceTitle, species, chunkIndex, text: chunkText });
+        pending.push({ source, sourceTitle, species, category: 'daily_care', chunkIndex, text: chunkText });
+      });
+    }
+  }
+
+  return pending;
+}
+
+function walkFiles(dir: string): string[] {
+  const results: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) results.push(...walkFiles(full));
+    else if (/\.(pdf|html)$/i.test(entry.name)) results.push(full);
+  }
+  return results;
+}
+
+async function collectLabInterpretationChunks(): Promise<PendingChunk[]> {
+  const pending: PendingChunk[] = [];
+  const filePaths = walkFiles(LAB_DATA_DIR);
+
+  for (const filePath of filePaths) {
+    const fileName = path.basename(filePath);
+    const speciesList = LAB_SPECIES_MAP[fileName];
+    const source = LAB_SOURCE_MAP[fileName];
+    if (!speciesList || !source) {
+      console.warn(`[ingest] 血檢語料沒有對應設定，略過: ${fileName}`);
+      continue;
+    }
+
+    console.log(`[ingest] 解析 ${source}/${fileName}...`);
+    const isPdf = fileName.toLowerCase().endsWith('.pdf');
+    const text = isPdf ? await extractPdfText(filePath) : extractHtmlText(filePath);
+    if (!text) {
+      console.warn(`[ingest] ${fileName} 抽不出文字，略過`);
+      continue;
+    }
+
+    const chunks = chunkByWords(text);
+    // 同一份文件要同時掛在多個物種標籤下時（例如跨物種指南），sourceTitle 加上物種後綴避免撞到唯一索引
+    for (const species of speciesList) {
+      const sourceTitle = speciesList.length > 1
+        ? `${fileName.replace(/\.(pdf|html)$/i, '')}__${species}`
+        : fileName.replace(/\.(pdf|html)$/i, '');
+      chunks.forEach((chunkText, chunkIndex) => {
+        pending.push({ source, sourceTitle, species, category: 'lab_interpretation', chunkIndex, text: chunkText });
       });
     }
   }
@@ -130,6 +225,7 @@ async function embedAndUpsert(chunks: PendingChunk[]): Promise<void> {
             source: chunk.source,
             sourceTitle: chunk.sourceTitle,
             species: chunk.species,
+            category: chunk.category,
             chunkIndex: chunk.chunkIndex,
             text: chunk.text,
             embedding: response.data[idx].embedding,
@@ -168,8 +264,10 @@ async function main(): Promise<void> {
   await mongoose.connect(process.env.MONGODB_URI!);
   console.log('[ingest] MongoDB connected');
 
-  const chunks = await collectChunks();
-  console.log(`[ingest] 共 ${chunks.length} 個 chunk 待處理`);
+  const dailyCareChunks = await collectDailyCareChunks();
+  const labChunks = await collectLabInterpretationChunks();
+  const chunks = [...dailyCareChunks, ...labChunks];
+  console.log(`[ingest] 共 ${chunks.length} 個 chunk 待處理（daily_care ${dailyCareChunks.length}、lab_interpretation ${labChunks.length}）`);
 
   await embedAndUpsert(chunks);
   await ensureVectorIndex();

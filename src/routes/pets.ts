@@ -8,6 +8,9 @@ import {
   addPetLog, getPetLogs, deletePetLog,
   getAiCare,
 } from '../controllers/petsController';
+import {
+  parseLabResult, saveLabResult, getLabResults, getLabResult, deleteLabResult,
+} from '../controllers/labResultsController';
 
 const router = Router();
 router.use(requireAuth);
@@ -27,5 +30,11 @@ router.get('/:id/weight-logs', getWeightLogs);
 router.post('/:id/logs', upload.array('images', 5), addPetLog);
 router.get('/:id/logs', getPetLogs);
 router.delete('/:id/logs/:logId', deletePetLog);
+
+router.post('/:id/lab-results/parse', aiLimiter, upload.single('image'), parseLabResult);
+router.post('/:id/lab-results', saveLabResult);
+router.get('/:id/lab-results', getLabResults);
+router.get('/:id/lab-results/:resultId', getLabResult);
+router.delete('/:id/lab-results/:resultId', deleteLabResult);
 
 export default router;

@@ -17,7 +17,7 @@ import { startNotificationJobs } from './jobs/notificationJobs';
 
 const app = express();
 
-app.use(cors());
+app.use(cors({ exposedHeaders: ['RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset'] }));
 app.use(express.json({ limit: '10mb' }));
 
 app.use('/', legalRoutes);

@@ -4,6 +4,7 @@ import Pet from '../models/Pet';
 import WeightLog from '../models/WeightLog';
 import PetLog from '../models/PetLog';
 import CalendarEvent from '../models/CalendarEvent';
+import LabResult from '../models/LabResult';
 import mongoose from 'mongoose';
 import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
 import { generatePetCare } from '../utils/groq';
@@ -137,12 +138,19 @@ export async function deletePet(req: AuthRequest, res: Response): Promise<void> 
   const logs = await PetLog.find({ petId: pet._id }).select('images').lean();
   const logImageUrls = logs.flatMap((l) => (l.images ?? []).map((img: any) => img.url));
 
+  const labResults = await LabResult.find({ petId: pet._id }).select('imageUrl').lean();
+  const labResultImageUrls = labResults.map((r) => r.imageUrl);
+
   await Promise.all([
     WeightLog.deleteMany({ petId: pet._id }),
     PetLog.deleteMany({ petId: pet._id }),
     CalendarEvent.deleteMany({ petId: pet._id }),
+    LabResult.deleteMany({ petId: pet._id }),
     ...logImageUrls.map((url) => deleteImageByUrl(url).catch((e) =>
       console.error(`[deletePet] 日誌圖片刪除失敗，petId=${pet._id}`, e)
+    )),
+    ...labResultImageUrls.map((url) => deleteImageByUrl(url).catch((e) =>
+      console.error(`[deletePet] 檢驗報告圖片刪除失敗，petId=${pet._id}`, e)
     )),
     ...(pet.photoUrl ? [deleteImageByUrl(pet.photoUrl).catch((e) =>
       console.error(`[deletePet] 頭像刪除失敗，petId=${pet._id}`, e)
