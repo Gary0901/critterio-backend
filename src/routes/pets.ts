@@ -9,7 +9,7 @@ import {
   getAiCare,
 } from '../controllers/petsController';
 import {
-  parseVisitReport, createVetVisit, getVetVisits, getVetVisit, deleteVetVisit,
+  parseVisitReport, getVisitParseJob, createVetVisit, getVetVisits, getVetVisit, deleteVetVisit,
 } from '../controllers/vetVisitsController';
 
 const router = Router();
@@ -32,6 +32,7 @@ router.get('/:id/logs', getPetLogs);
 router.delete('/:id/logs/:logId', deletePetLog);
 
 router.post('/:id/vet-visits/parse-report', aiLimiter, upload.single('image'), parseVisitReport);
+router.get('/:id/vet-visits/parse-jobs/:jobId', getVisitParseJob);
 router.post('/:id/vet-visits', createVetVisit);
 router.get('/:id/vet-visits', getVetVisits);
 router.get('/:id/vet-visits/:visitId', getVetVisit);

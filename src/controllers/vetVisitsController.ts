@@ -4,8 +4,10 @@ import { AuthRequest } from '../middleware/auth';
 import Pet from '../models/Pet';
 import VetVisit, { LabResultItem } from '../models/VetVisit';
 import CalendarEvent from '../models/CalendarEvent';
+import VisitParseJob from '../models/VisitParseJob';
 import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
 import { searchKnowledgeBase } from '../utils/knowledgeSearch';
+import { sendNotification } from '../utils/push';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -201,6 +203,69 @@ function formatVetVisit(doc: any) {
 
 // ─── Endpoints ──────────────────────────────────────────────────────────────
 
+// 解析要跑兩輪 GPT 呼叫，常常要十幾秒以上，不讓使用者卡在畫面上等——
+// 上傳圖片後立刻回傳 jobId，實際解析在背景進行（fire-and-forget，不 await），
+// 完成後把結果寫回 VisitParseJob 並推播通知使用者
+async function runParseJob(
+  jobId: string,
+  userId: string,
+  petId: string,
+  petName: string,
+  species: string,
+  speciesLabel: string,
+  imageUrl: string
+): Promise<void> {
+  const notifData = { petId, petName, jobId };
+  try {
+    const { reportType, items } = await extractItemsFromImage(imageUrl, speciesLabel);
+    const { items: itemsWithExplanation, summaryAdvice } = await generateExplanations(
+      species, speciesLabel, reportType, items
+    );
+
+    if (itemsWithExplanation.length === 0) {
+      await VisitParseJob.findByIdAndUpdate(jobId, {
+        status: 'failed',
+        errorMessage: '這張照片看起來沒有可辨識的數值型檢驗項目，請確認是血檢/生化等報告照片。',
+      });
+      await sendNotification({
+        recipientUserId: userId,
+        type: 'vet_visit_parsed',
+        title: '報告解析失敗',
+        body: `${petName} 的報告沒有辨識到可用的檢驗數值，請重新拍攝或確認照片內容。`,
+        data: notifData,
+      });
+      return;
+    }
+
+    await VisitParseJob.findByIdAndUpdate(jobId, {
+      status: 'ready',
+      reportType,
+      items: itemsWithExplanation,
+      summaryAdvice,
+    });
+    await sendNotification({
+      recipientUserId: userId,
+      type: 'vet_visit_parsed',
+      title: '檢驗報告解析完成',
+      body: `${petName} 的報告已經解析好了，點擊查看並確認存檔。`,
+      data: notifData,
+    });
+  } catch (e) {
+    console.error(`[vetVisitsController] 背景解析失敗，jobId=${jobId}`, e);
+    await VisitParseJob.findByIdAndUpdate(jobId, {
+      status: 'failed',
+      errorMessage: 'AI 報告解析失敗，請稍後再試。',
+    }).catch(() => {});
+    await sendNotification({
+      recipientUserId: userId,
+      type: 'vet_visit_parsed',
+      title: '報告解析失敗',
+      body: `${petName} 的報告解析時發生錯誤，請重新嘗試。`,
+      data: notifData,
+    }).catch(() => {});
+  }
+}
+
 export async function parseVisitReport(req: AuthRequest, res: Response): Promise<void> {
   const pet = await Pet.findOne({ _id: req.params.id, userId: req.userId });
   if (!pet) {
@@ -222,20 +287,47 @@ export async function parseVisitReport(req: AuthRequest, res: Response): Promise
     return;
   }
 
-  try {
-    const { reportType, items } = await extractItemsFromImage(imageUrl, speciesLabel);
-    const { items: itemsWithExplanation, summaryAdvice } = await generateExplanations(
-      pet.species, speciesLabel, reportType, items
-    );
-    res.json({
-      success: true,
-      data: { imageUrl, reportType, items: itemsWithExplanation, summaryAdvice },
-      message: '',
-    });
-  } catch (e) {
-    console.error(`[vetVisitsController] 報告解析失敗，petId=${pet._id}`, e);
-    res.status(500).json({ success: false, data: null, message: 'AI 報告解析失敗，請稍後再試' });
+  const job = await VisitParseJob.create({
+    userId: req.userId,
+    petId: pet._id,
+    status: 'processing',
+    imageUrl,
+  });
+
+  // 不 await：讓這支 API 立刻回應，解析在背景繼續跑
+  runParseJob(String(job._id), req.userId!, String(pet._id), pet.name, pet.species, speciesLabel, imageUrl);
+
+  res.status(202).json({
+    success: true,
+    data: { jobId: job._id, status: 'processing', imageUrl },
+    message: '報告已上傳，正在解析中',
+  });
+}
+
+export async function getVisitParseJob(req: AuthRequest, res: Response): Promise<void> {
+  const pet = await Pet.findOne({ _id: req.params.id, userId: req.userId });
+  if (!pet) {
+    res.status(404).json({ success: false, data: null, message: '找不到寵物' });
+    return;
   }
+  const job = await VisitParseJob.findOne({ _id: req.params.jobId, petId: pet._id });
+  if (!job) {
+    res.status(404).json({ success: false, data: null, message: '找不到解析工作' });
+    return;
+  }
+  res.json({
+    success: true,
+    data: {
+      jobId: job._id,
+      status: job.status,
+      imageUrl: job.imageUrl,
+      reportType: job.reportType ?? '',
+      items: job.items ?? [],
+      summaryAdvice: job.summaryAdvice ?? '',
+      errorMessage: job.errorMessage ?? '',
+    },
+    message: '',
+  });
 }
 
 export async function createVetVisit(req: AuthRequest, res: Response): Promise<void> {
