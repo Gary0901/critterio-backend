@@ -2,7 +2,8 @@ import { Response } from 'express';
 import OpenAI from 'openai';
 import { AuthRequest } from '../middleware/auth';
 import Pet from '../models/Pet';
-import LabResult, { LabResultItem } from '../models/LabResult';
+import VetVisit, { LabResultItem } from '../models/VetVisit';
+import CalendarEvent from '../models/CalendarEvent';
 import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
 import { searchKnowledgeBase } from '../utils/knowledgeSearch';
 
@@ -18,17 +19,19 @@ const SPECIES_LABEL: Record<string, string> = {
 
 type ExtractedItem = Omit<LabResultItem, 'plainExplanation'>;
 
-// ─── 第一階段：從報告照片抽取數值型項目（不生成白話解釋）─────────────────────────
+// ─── 檢驗報告數值解析（就醫紀錄裡的可選子步驟）：抽取數值型項目（不生成白話解釋）─────
 
 const EXTRACTION_SYSTEM_PROMPT = `你是專業的獸醫數據解析助手。使用者會傳入一張寵物血檢/生化/尿檢等「數值型」檢驗報告照片。
 
 請只抽取有「數值」的檢測項目（例如 ALT、BUN、GLU、WBC 等），不要嘗試解讀 X 光、超音波等影像類報告的內容——如果照片看起來是影像報告而非數值報告，items 請回傳空陣列。
 
 規則：
-1. status 的判定必須完全依照報告單上印出的參考範圍（reference range）。如果該項目報告單上沒有印出參考範圍，一律回傳 status: "UNKNOWN"，絕對不可以套用你自己知道的通用標準去猜測高低。
-2. refRange 請照報告單上印出的原始文字填入；沒有印出就留空字串。
-3. abbreviation 若報告單上有印出縮寫（如 ALT、BUN）就填入，沒有就留空字串。
-4. value 請填數字（去除單位），unit 填該項目的單位。`;
+1. **只抽取「結果」欄位真的印刷或手寫了實際檢測數值的項目**。如果某一列只印出項目名稱和參考範圍，但結果欄位是空白、沒有實際數值，這一列直接跳過、不要放進 items，絕對不可以拿參考範圍、典型值或你自己的醫學知識去杜撰一個數字填進去——沒有真實數據就是沒有，寧可漏掉也不能編造。
+2. 報告上每一列只要「結果」欄位有真實數值，就要逐一列出，不可以因為欄位多、篇幅長而漏掉任何一列。
+3. status 的判定必須完全依照報告單上印出的參考範圍（reference range）。如果該項目報告單上沒有印出參考範圍，一律回傳 status: "UNKNOWN"，絕對不可以套用你自己知道的通用標準去猜測高低。
+4. refRange 請照報告單上印出的原始文字填入；沒有印出就留空字串。
+5. abbreviation 若報告單上有印出縮寫（如 ALT、BUN）就填入，沒有就留空字串。
+6. value 請填數字（去除單位），unit 填該項目的單位。`;
 
 const EXTRACTION_JSON_SCHEMA = {
   name: 'lab_result_extraction',
@@ -84,7 +87,7 @@ async function extractItemsFromImage(
   return parsed;
 }
 
-// ─── 第二階段：生成白話文解釋（鳥類/爬蟲類異常值先查 RAG 佐證）─────────────────
+// ─── 白話文解釋生成（鳥類/爬蟲類異常值先查 RAG 佐證）─────────────────────────────
 
 const EXPLANATION_JSON_SCHEMA = {
   name: 'lab_result_explanation',
@@ -125,7 +128,7 @@ async function buildKnowledgeContext(species: string, items: ExtractedItem[]): P
         snippets.push(`【${item.itemName}】文獻段落：${results[0].text}`);
       }
     } catch (e) {
-      console.error(`[labResultsController] RAG 查詢失敗 item=${item.itemName}`, e);
+      console.error(`[vetVisitsController] RAG 查詢失敗 item=${item.itemName}`, e);
     }
   }
   return snippets.join('\n\n');
@@ -171,28 +174,34 @@ async function generateExplanations(
   const explanationByName = new Map(parsed.items.map((i) => [i.itemName, i.plainExplanation]));
   const merged: LabResultItem[] = items.map((item) => ({
     ...item,
-    plainExplanation: explanationByName.get(item.itemName) ?? '',
+    // AI 偶爾會漏生成某個項目的解釋（itemName 對不上或回傳空字串），
+    // 給個保底文字讓飼主至少知道要自己核對，而不是留白讓人以為系統壞掉
+    plainExplanation: explanationByName.get(item.itemName) || `AI 尚未提供這項的說明，請自行核對報告單上的數值（狀態：${item.status}）。`,
   }));
 
   return { items: merged, summaryAdvice: parsed.summaryAdvice };
 }
 
-function formatLabResult(doc: any) {
+function formatVetVisit(doc: any) {
   return {
     id: doc._id,
     petId: doc.petId,
-    imageUrl: doc.imageUrl,
-    reportType: doc.reportType,
-    reportDate: doc.reportDate,
+    visitDate: doc.visitDate,
+    clinicName: doc.clinicName ?? '',
+    diagnosisNote: doc.diagnosisNote ?? '',
+    imageUrl: doc.imageUrl ?? '',
+    reportType: doc.reportType ?? '',
     items: doc.items,
+    medications: doc.medications,
     summaryAdvice: doc.summaryAdvice,
+    calendarEventId: doc.calendarEventId ?? null,
     createdAt: doc.createdAt,
   };
 }
 
 // ─── Endpoints ──────────────────────────────────────────────────────────────
 
-export async function parseLabResult(req: AuthRequest, res: Response): Promise<void> {
+export async function parseVisitReport(req: AuthRequest, res: Response): Promise<void> {
   const pet = await Pet.findOne({ _id: req.params.id, userId: req.userId });
   if (!pet) {
     res.status(404).json({ success: false, data: null, message: '找不到寵物' });
@@ -206,9 +215,9 @@ export async function parseLabResult(req: AuthRequest, res: Response): Promise<v
   const speciesLabel = SPECIES_LABEL[pet.species] ?? '寵物';
   let imageUrl: string;
   try {
-    imageUrl = await uploadImage(req.file.buffer, 'critterio/lab-results');
+    imageUrl = await uploadImage(req.file.buffer, 'critterio/vet-visits');
   } catch (e) {
-    console.error(`[labResultsController] 圖片上傳失敗，petId=${pet._id}`, e);
+    console.error(`[vetVisitsController] 圖片上傳失敗，petId=${pet._id}`, e);
     res.status(500).json({ success: false, data: null, message: '圖片上傳失敗，請稍後再試' });
     return;
   }
@@ -220,80 +229,102 @@ export async function parseLabResult(req: AuthRequest, res: Response): Promise<v
     );
     res.json({
       success: true,
-      data: {
-        imageUrl,
-        reportType,
-        items: itemsWithExplanation,
-        summaryAdvice,
-      },
+      data: { imageUrl, reportType, items: itemsWithExplanation, summaryAdvice },
       message: '',
     });
   } catch (e) {
-    console.error(`[labResultsController] 報告解析失敗，petId=${pet._id}`, e);
+    console.error(`[vetVisitsController] 報告解析失敗，petId=${pet._id}`, e);
     res.status(500).json({ success: false, data: null, message: 'AI 報告解析失敗，請稍後再試' });
   }
 }
 
-export async function saveLabResult(req: AuthRequest, res: Response): Promise<void> {
+export async function createVetVisit(req: AuthRequest, res: Response): Promise<void> {
   const pet = await Pet.findOne({ _id: req.params.id, userId: req.userId });
   if (!pet) {
     res.status(404).json({ success: false, data: null, message: '找不到寵物' });
     return;
   }
-  const { imageUrl, reportType, reportDate, items, summaryAdvice } = req.body;
-  if (!imageUrl || !reportType || !reportDate || !Array.isArray(items)) {
-    res.status(400).json({ success: false, data: null, message: 'imageUrl、reportType、reportDate、items 為必填' });
+  const {
+    visitDate, clinicName, diagnosisNote, medications,
+    imageUrl, reportType, items, summaryAdvice, syncToCalendar,
+  } = req.body;
+  if (!visitDate) {
+    res.status(400).json({ success: false, data: null, message: 'visitDate 為必填' });
     return;
   }
 
-  const result = await LabResult.create({
-    petId: pet._id,
-    imageUrl,
-    reportType,
-    reportDate: new Date(reportDate),
-    items,
-    summaryAdvice: summaryAdvice ?? '',
-  });
-  res.status(201).json({ success: true, data: formatLabResult(result), message: '報告已儲存' });
+  try {
+    let calendarEventId: string | undefined;
+    if (syncToCalendar) {
+      const event = await CalendarEvent.create({
+        userId: req.userId,
+        petId: pet._id,
+        type: 'medical',
+        title: clinicName ? `回診：${clinicName}` : '回診紀錄',
+        startTime: new Date(visitDate),
+        note: diagnosisNote ?? '',
+      });
+      calendarEventId = String(event._id);
+    }
+
+    const visit = await VetVisit.create({
+      petId: pet._id,
+      visitDate: new Date(visitDate),
+      clinicName: clinicName ?? '',
+      diagnosisNote: diagnosisNote ?? '',
+      imageUrl: imageUrl ?? '',
+      reportType: reportType ?? '',
+      items: Array.isArray(items) ? items : [],
+      medications: Array.isArray(medications) ? medications : [],
+      summaryAdvice: summaryAdvice ?? '',
+      calendarEventId,
+    });
+    res.status(201).json({ success: true, data: formatVetVisit(visit), message: '就醫紀錄已儲存' });
+  } catch (e) {
+    console.error(`[vetVisitsController] 就醫紀錄儲存失敗，petId=${pet._id}`, e);
+    res.status(500).json({ success: false, data: null, message: '就醫紀錄儲存失敗，請稍後再試' });
+  }
 }
 
-export async function getLabResults(req: AuthRequest, res: Response): Promise<void> {
+export async function getVetVisits(req: AuthRequest, res: Response): Promise<void> {
   const pet = await Pet.findOne({ _id: req.params.id, userId: req.userId });
   if (!pet) {
     res.status(404).json({ success: false, data: null, message: '找不到寵物' });
     return;
   }
-  const results = await LabResult.find({ petId: pet._id }).sort({ reportDate: -1 });
-  res.json({ success: true, data: results.map(formatLabResult), message: '' });
+  const visits = await VetVisit.find({ petId: pet._id }).sort({ visitDate: -1 });
+  res.json({ success: true, data: visits.map(formatVetVisit), message: '' });
 }
 
-export async function getLabResult(req: AuthRequest, res: Response): Promise<void> {
+export async function getVetVisit(req: AuthRequest, res: Response): Promise<void> {
   const pet = await Pet.findOne({ _id: req.params.id, userId: req.userId });
   if (!pet) {
     res.status(404).json({ success: false, data: null, message: '找不到寵物' });
     return;
   }
-  const result = await LabResult.findOne({ _id: req.params.resultId, petId: pet._id });
-  if (!result) {
-    res.status(404).json({ success: false, data: null, message: '找不到報告' });
+  const visit = await VetVisit.findOne({ _id: req.params.visitId, petId: pet._id });
+  if (!visit) {
+    res.status(404).json({ success: false, data: null, message: '找不到就醫紀錄' });
     return;
   }
-  res.json({ success: true, data: formatLabResult(result), message: '' });
+  res.json({ success: true, data: formatVetVisit(visit), message: '' });
 }
 
-export async function deleteLabResult(req: AuthRequest, res: Response): Promise<void> {
+export async function deleteVetVisit(req: AuthRequest, res: Response): Promise<void> {
   const pet = await Pet.findOne({ _id: req.params.id, userId: req.userId });
   if (!pet) {
     res.status(404).json({ success: false, data: null, message: '找不到寵物' });
     return;
   }
-  const result = await LabResult.findOneAndDelete({ _id: req.params.resultId, petId: pet._id });
-  if (!result) {
-    res.status(404).json({ success: false, data: null, message: '找不到報告' });
+  const visit = await VetVisit.findOneAndDelete({ _id: req.params.visitId, petId: pet._id });
+  if (!visit) {
+    res.status(404).json({ success: false, data: null, message: '找不到就醫紀錄' });
     return;
   }
-  await deleteImageByUrl(result.imageUrl).catch((e) =>
-    console.error(`[labResultsController] 報告圖片刪除失敗，resultId=${result._id}`, e)
-  );
-  res.json({ success: true, data: null, message: '報告已刪除' });
+  if (visit.imageUrl) {
+    await deleteImageByUrl(visit.imageUrl).catch((e) =>
+      console.error(`[vetVisitsController] 報告圖片刪除失敗，visitId=${visit._id}`, e)
+    );
+  }
+  res.json({ success: true, data: null, message: '就醫紀錄已刪除' });
 }

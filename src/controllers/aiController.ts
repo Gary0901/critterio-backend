@@ -7,7 +7,7 @@ import Pet from '../models/Pet';
 import WeightLog from '../models/WeightLog';
 import PetLog from '../models/PetLog';
 import CalendarEvent from '../models/CalendarEvent';
-import LabResult from '../models/LabResult';
+import VetVisit from '../models/VetVisit';
 import { uploadImage } from '../utils/cloudinary';
 import { searchKnowledgeBase } from '../utils/knowledgeSearch';
 
@@ -49,9 +49,9 @@ const PET_DATA_TOOL_GUIDANCE = `
 
 你可以透過提供的工具查詢這隻寵物在 App 內的真實紀錄（體重歷史、每日照護日誌、回診/疫苗/驅蟲/美容行事曆）。當使用者的問題可能跟這些紀錄有關（例如體重變化、最近吃過什麼藥、上次回診時間、症狀從什麼時候開始），請主動呼叫對應工具取得真實資料再回答，不要憑空猜測或只依賴使用者口述。若工具回傳空結果，如實告知使用者目前沒有相關紀錄，不要編造。
 
-特別注意 get_lab_history：
-- 這個工具回傳的是飼主之前上傳並經 AI 解析過的血檢/生化等數值型檢驗報告，每份報告內有多個檢測項目（數值、單位、參考範圍、高低標、白話解釋）。當使用者問起特定指標（例如肝指數、腎功能、血糖）的歷史數值或趨勢時，主動呼叫這個工具並具體引用報告中的數字與日期回答，不要只用背景資訊裡的體重等籠統資料代替。
-- 若回傳空陣列，代表飼主還沒上傳過檢驗報告，如實告知，不要編造數值。
+特別注意 get_vet_visit_history：
+- 這個工具回傳的是飼主記錄過的就醫紀錄，每筆包含看診日期、診所名稱、看診原因/診斷內容、用藥紀錄，以及選擇性上傳並經 AI 解析過的血檢/生化等數值型檢驗報告（多個檢測項目：數值、單位、參考範圍、高低標、白話解釋）。當使用者問起「上次去哪間看診」「開了什麼藥」「特定指標（如肝指數、腎功能、血糖）的歷史數值或趨勢」時，主動呼叫這個工具並具體引用紀錄中的診所名稱、用藥、數字與日期回答，不要只用背景資訊裡的體重等籠統資料代替。
+- 若回傳空陣列，代表飼主還沒記錄過就醫紀錄，如實告知，不要編造數值。
 
 特別注意 get_weight_history：
 - 如果這個工具回傳的是**非空陣列**（有任何一筆資料），代表使用者確實有新增過歷史體重紀錄，你必須逐筆檢視回傳的 weightKg 和 recordedAt，在回答裡具體引用這些真實數字和日期（例如最新一筆是多少、跟前幾筆比較是上升還下降），絕對不可以說「沒有找到歷史紀錄」——工具有回傳資料就代表資料庫裡真的有，不要憑空認定它是空的
@@ -107,12 +107,12 @@ const PET_RECORD_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
-      name: 'get_lab_history',
-      description: '取得這隻寵物過去上傳並解析過的血檢/生化等數值型檢驗報告紀錄，可用來回答飼主詢問特定指標（如肝腎功能）的歷史數值與趨勢。',
+      name: 'get_vet_visit_history',
+      description: '取得這隻寵物過去的就醫紀錄，包含看診日期、診所、看診原因/診斷、用藥紀錄，以及選擇性的檢驗報告數值，可用來回答飼主詢問看診歷史、用藥或特定指標（如肝腎功能）的歷史數值與趨勢。',
       parameters: {
         type: 'object',
         properties: {
-          limit: { type: 'number', description: '要取回的報告筆數，預設 5，最多 20' },
+          limit: { type: 'number', description: '要取回的紀錄筆數，預設 5，最多 20' },
         },
       },
     },
@@ -171,11 +171,14 @@ async function executeTool(
       const events = await CalendarEvent.find(filter).sort({ startTime: 1 }).limit(30).lean();
       return events.map(e => ({ title: e.title, type: e.type, startTime: e.startTime, done: e.done, note: e.note }));
     }
-    case 'get_lab_history': {
+    case 'get_vet_visit_history': {
       const limit = Math.min(Number(args.limit) || 5, 20);
-      const results = await LabResult.find({ petId }).sort({ reportDate: -1 }).limit(limit).lean();
+      const results = await VetVisit.find({ petId }).sort({ visitDate: -1 }).limit(limit).lean();
       return results.map(r => ({
-        reportDate: r.reportDate,
+        visitDate: r.visitDate,
+        clinicName: r.clinicName,
+        diagnosisNote: r.diagnosisNote,
+        medications: r.medications,
         reportType: r.reportType,
         items: r.items,
         summaryAdvice: r.summaryAdvice,

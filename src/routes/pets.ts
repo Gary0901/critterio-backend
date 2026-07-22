@@ -9,8 +9,8 @@ import {
   getAiCare,
 } from '../controllers/petsController';
 import {
-  parseLabResult, saveLabResult, getLabResults, getLabResult, deleteLabResult,
-} from '../controllers/labResultsController';
+  parseVisitReport, createVetVisit, getVetVisits, getVetVisit, deleteVetVisit,
+} from '../controllers/vetVisitsController';
 
 const router = Router();
 router.use(requireAuth);
@@ -31,10 +31,10 @@ router.post('/:id/logs', upload.array('images', 5), addPetLog);
 router.get('/:id/logs', getPetLogs);
 router.delete('/:id/logs/:logId', deletePetLog);
 
-router.post('/:id/lab-results/parse', aiLimiter, upload.single('image'), parseLabResult);
-router.post('/:id/lab-results', saveLabResult);
-router.get('/:id/lab-results', getLabResults);
-router.get('/:id/lab-results/:resultId', getLabResult);
-router.delete('/:id/lab-results/:resultId', deleteLabResult);
+router.post('/:id/vet-visits/parse-report', aiLimiter, upload.single('image'), parseVisitReport);
+router.post('/:id/vet-visits', createVetVisit);
+router.get('/:id/vet-visits', getVetVisits);
+router.get('/:id/vet-visits/:visitId', getVetVisit);
+router.delete('/:id/vet-visits/:visitId', deleteVetVisit);
 
 export default router;
