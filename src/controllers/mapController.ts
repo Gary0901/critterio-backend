@@ -26,11 +26,12 @@ export async function searchNearby(req: AuthRequest, res: Response): Promise<voi
   if (is24hr === 'true') filter.is24Hours = true;
   if (exoticFriendly === 'true') filter.exoticFriendly = true;
 
-  const places = await Place.find(filter).limit(100).lean();
-
-  // 查詢當前用戶的收藏
-  const placeIds = places.map((p) => p._id);
-  const favs = await Favorite.find({ userId: req.userId, placeId: { $in: placeIds } }).lean();
+  // 收藏清單跟這次的地點搜尋結果無關（不需要等地點查完才知道要查哪些 placeId），
+  // 直接平行查詢，改成依序查詢會白白多等一次資料庫往返
+  const [places, favs] = await Promise.all([
+    Place.find(filter).limit(100).lean(),
+    Favorite.find({ userId: req.userId }).select('placeId').lean(),
+  ]);
   const favSet = new Set(favs.map((f) => String(f.placeId)));
 
   const data = places.map((p) => ({
