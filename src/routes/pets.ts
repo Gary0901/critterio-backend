@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth';
 import upload from '../middleware/upload';
-import { aiLimiter } from '../middleware/rateLimit';
+import { aiLimiter, reportParseLimiter } from '../middleware/rateLimit';
 import {
   createPet, getPets, getPet, updatePet, deletePet, updateCareTargets, reorderPets,
   addWeightLog, getWeightLogs,
@@ -31,7 +31,7 @@ router.post('/:id/logs', upload.array('images', 5), addPetLog);
 router.get('/:id/logs', getPetLogs);
 router.delete('/:id/logs/:logId', deletePetLog);
 
-router.post('/:id/vet-visits/parse-report', aiLimiter, upload.single('image'), parseVisitReport);
+router.post('/:id/vet-visits/parse-report', reportParseLimiter, upload.single('image'), parseVisitReport);
 router.get('/:id/vet-visits/parse-jobs/:jobId', getVisitParseJob);
 router.post('/:id/vet-visits', createVetVisit);
 router.get('/:id/vet-visits', getVetVisits);
