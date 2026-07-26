@@ -355,6 +355,8 @@ export async function createVetVisit(req: AuthRequest, res: Response): Promise<v
         title: clinicName ? `回診：${clinicName}` : '回診紀錄',
         startTime: new Date(visitDate),
         note: diagnosisNote ?? '',
+        // 就醫紀錄是回顧性登記（看診當下或之後才補記），不是還沒發生的提醒事項，預設標記完成
+        done: true,
       });
       calendarEventId = String(event._id);
     }
