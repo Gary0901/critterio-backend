@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import crypto from 'crypto';
+import User from '../models/User';
 
 const router = Router();
 
@@ -7,10 +9,24 @@ const APP_SCHEME = process.env.APP_SCHEME || 'critterio';
 // forgotPassword 產生的 token 是 crypto.randomBytes(32).toString('hex')
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 
-function renderResetPage(token: string | null): string {
-  const valid = token !== null && TOKEN_PATTERN.test(token);
+/**
+ * token 是否仍可用。格式合法還不夠——用過或過期的 token 必須擋在網頁這一層，
+ * 否則使用者會被帶進 App 的重設畫面，輸入完新密碼才在送出時失敗。
+ */
+async function isTokenUsable(token: string): Promise<boolean> {
+  const hashed = crypto.createHash('sha256').update(token).digest('hex');
+  const user = await User.findOne({
+    resetPasswordToken: hashed,
+    resetPasswordExpires: { $gt: new Date() },
+  })
+    .select('_id')
+    .lean();
+  return !!user;
+}
+
+function renderResetPage(token: string | null, valid: boolean): string {
   // token 已通過白名單驗證（純 hex），可安全嵌入；非法輸入一律不回填
-  const deepLink = valid ? `${APP_SCHEME}://reset-password?token=${token}` : '';
+  const deepLink = valid && token ? `${APP_SCHEME}://reset-password?token=${token}` : '';
 
   const body = valid
     ? `
@@ -27,8 +43,8 @@ function renderResetPage(token: string | null): string {
       setTimeout(function () { window.location.href = ${JSON.stringify(deepLink)}; }, 400);
     </script>`
     : `
-    <h1>連結無效</h1>
-    <p class="lead">這個重設連結格式不正確，或已經被使用過。</p>
+    <h1>連結已失效</h1>
+    <p class="lead">這個重設連結已經被使用過，或是已經超過有效時間。</p>
     <div class="hint">
       <p>請回到 Critterio App 的登入頁面，重新點選「忘記密碼」取得新的連結。</p>
       <p class="muted">重設連結自寄出後 1 小時內有效，且只能使用一次。</p>
@@ -57,10 +73,20 @@ function renderResetPage(token: string | null): string {
 </html>`;
 }
 
-router.get('/reset-password', (req, res) => {
+router.get('/reset-password', async (req, res) => {
   const raw = req.query.token;
-  const token = typeof raw === 'string' ? raw : null;
-  res.type('html').send(renderResetPage(token));
+  const token = typeof raw === 'string' && TOKEN_PATTERN.test(raw) ? raw : null;
+
+  let valid = false;
+  if (token) {
+    try {
+      valid = await isTokenUsable(token);
+    } catch (e) {
+      console.error('[web] 重設 token 查詢失敗', e);
+    }
+  }
+
+  res.type('html').send(renderResetPage(token, valid));
 });
 
 export default router;
