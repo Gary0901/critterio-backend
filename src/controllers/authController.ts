@@ -200,10 +200,13 @@ export async function forgotPassword(req: Request, res: Response): Promise<void>
   user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 小時有效
   await user.save();
 
-  const scheme = process.env.APP_SCHEME ?? 'critterio';
-  const resetLink = `${scheme}://reset-password?token=${rawToken}`;
+  // 必須用 https 連結：Gmail、Outlook 等網頁信箱不會把 critterio:// 這類
+  // custom scheme 變成可點的連結，甚至會直接濾掉。這個網頁再負責喚起 App。
+  // 用 || 而非 ??：環境變數存在但為空字串時也要 fallback
+  const publicBaseUrl = process.env.PUBLIC_BASE_URL || 'https://critterio-backend.zeabur.app';
+  const resetLink = `${publicBaseUrl}/reset-password?token=${rawToken}`;
 
-  const fromEmail = process.env.RESEND_FROM_EMAIL ?? 'Critterio <onboarding@resend.dev>';
+  const fromEmail = process.env.RESEND_FROM_EMAIL || 'Critterio <onboarding@resend.dev>';
 
   const { error: sendError } = await resend.emails.send({
     from: fromEmail,

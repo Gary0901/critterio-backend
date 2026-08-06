@@ -11,8 +11,10 @@ import aiRoutes from './routes/ai';
 import mapRoutes from './routes/map';
 import calendarRoutes from './routes/calendar';
 import notificationsRoutes from './routes/notifications';
+import usersRoutes from './routes/users';
 import adminRoutes from './routes/admin';
 import legalRoutes from './routes/legal';
+import webRoutes from './routes/web';
 import { startNotificationJobs } from './jobs/notificationJobs';
 
 const app = express();
@@ -21,6 +23,7 @@ app.use(cors({ exposedHeaders: ['RateLimit-Limit', 'RateLimit-Remaining', 'RateL
 app.use(express.json({ limit: '10mb' }));
 
 app.use('/', legalRoutes);
+app.use('/', webRoutes);
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/pets', petRoutes);
@@ -29,6 +32,7 @@ app.use('/api/v1/ai', aiRoutes);
 app.use('/api/v1/map', mapRoutes);
 app.use('/api/v1/calendar', calendarRoutes);
 app.use('/api/v1/notifications', notificationsRoutes);
+app.use('/api/v1/users', usersRoutes);
 app.use('/api/v1/admin', adminRoutes);
 
 // 要接在所有路由之後、才能捕捉到 controller 裡沒被 catch 到的錯誤

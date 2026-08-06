@@ -7,6 +7,7 @@ import PostReport from '../models/PostReport';
 import User from '../models/User';
 import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
 import { sendNotification } from '../utils/push';
+import { getBlockedUserIds, isBlockedBetween } from '../utils/blocks';
 
 const REPORT_HIDE_THRESHOLD = 5;
 const POST_TYPES = ['question', 'meetup', 'share'] as const;
@@ -77,6 +78,9 @@ export async function getPosts(req: AuthRequest, res: Response): Promise<void> {
     filter.userId = req.userId;
   } else {
     filter.visibility = { $ne: 'private' };
+    // 雙向排除封鎖對象（看自己的貼文時不需要）
+    const blockedIds = await getBlockedUserIds(req.userId);
+    if (blockedIds.length > 0) filter.userId = { $nin: blockedIds };
   }
   if (POST_TYPES.includes(req.query.postType as PostType)) {
     filter.postType = req.query.postType;
@@ -150,9 +154,24 @@ export async function getPost(req: AuthRequest, res: Response): Promise<void> {
     res.status(404).json({ success: false, data: null, message: '找不到貼文' });
     return;
   }
+
+  // 封鎖對象的貼文：即使拿到直接連結也不該打得開
+  const blockedIds = await getBlockedUserIds(req.userId);
+  const blockedSet = new Set(blockedIds.map(String));
+  if (blockedSet.has(String(post.userId))) {
+    res.status(404).json({ success: false, data: null, message: '找不到貼文' });
+    return;
+  }
+
   const [myLike, comments] = await Promise.all([
     PostLike.findOne({ postId: post._id, userId: req.userId }),
-    Comment.find({ postId: post._id }).sort({ createdAt: 1 }).lean(),
+    // 封鎖對象的留言一併隱藏，否則對方仍能在看得到的貼文下騷擾
+    Comment.find({
+      postId: post._id,
+      ...(blockedIds.length > 0 ? { userId: { $nin: blockedIds } } : {}),
+    })
+      .sort({ createdAt: 1 })
+      .lean(),
   ]);
   const commentsWithUser = await Promise.all(
     comments.map(async (c) => ({ id: c._id, content: c.content, createdAt: c.createdAt, user: await populateUser(c.userId) }))
@@ -198,6 +217,10 @@ export async function toggleLike(req: AuthRequest, res: Response): Promise<void>
     res.status(404).json({ success: false, data: null, message: '找不到貼文' });
     return;
   }
+  if (await isBlockedBetween(String(req.userId), String(post.userId))) {
+    res.status(404).json({ success: false, data: null, message: '找不到貼文' });
+    return;
+  }
   const existing = await PostLike.findOne({ postId: post._id, userId: req.userId });
   let liked: boolean;
   if (existing) {
@@ -237,6 +260,10 @@ export async function addComment(req: AuthRequest, res: Response): Promise<void>
   }
   const post = await Post.findOne({ _id: req.params.id, status: 'active' });
   if (!post) {
+    res.status(404).json({ success: false, data: null, message: '找不到貼文' });
+    return;
+  }
+  if (await isBlockedBetween(String(req.userId), String(post.userId))) {
     res.status(404).json({ success: false, data: null, message: '找不到貼文' });
     return;
   }
