@@ -405,6 +405,73 @@ export async function getVetVisit(req: AuthRequest, res: Response): Promise<void
   res.json({ success: true, data: formatVetVisit(visit), message: '' });
 }
 
+export async function updateVetVisit(req: AuthRequest, res: Response): Promise<void> {
+  const pet = await Pet.findOne({ _id: req.params.id, userId: req.userId });
+  if (!pet) {
+    res.status(404).json({ success: false, data: null, message: '找不到寵物' });
+    return;
+  }
+  const visit = await VetVisit.findOne({ _id: req.params.visitId, petId: pet._id });
+  if (!visit) {
+    res.status(404).json({ success: false, data: null, message: '找不到就醫紀錄' });
+    return;
+  }
+
+  const {
+    visitDate, clinicName, diagnosisNote, medications,
+    items, summaryAdvice, syncToCalendar,
+  } = req.body;
+
+  // 只覆寫有送上來的欄位，沒送的維持原值（PATCH 語意）
+  if (visitDate !== undefined) {
+    const parsed = new Date(visitDate);
+    if (isNaN(parsed.getTime())) {
+      res.status(400).json({ success: false, data: null, message: 'visitDate 格式不正確' });
+      return;
+    }
+    visit.visitDate = parsed;
+  }
+  if (clinicName !== undefined)    visit.clinicName = clinicName;
+  if (diagnosisNote !== undefined) visit.diagnosisNote = diagnosisNote;
+  if (summaryAdvice !== undefined) visit.summaryAdvice = summaryAdvice;
+  if (Array.isArray(medications))  visit.medications = medications;
+  if (Array.isArray(items))        visit.items = items;
+  // imageUrl／reportType 不開放修改：報告圖片與解析結果綁定，
+  // 要換報告請刪除整筆重建，否則會出現「圖片是 A、數值是 B」的狀態
+
+  try {
+    // 行事曆事件跟著同步：開關可能被切換，日期與診所名也可能改了
+    if (syncToCalendar === true) {
+      const title = visit.clinicName ? `回診：${visit.clinicName}` : '回診紀錄';
+      if (visit.calendarEventId) {
+        await CalendarEvent.findByIdAndUpdate(visit.calendarEventId, {
+          $set: { title, startTime: visit.visitDate, note: visit.diagnosisNote ?? '' },
+        });
+      } else {
+        const event = await CalendarEvent.create({
+          userId: req.userId,
+          petId: pet._id,
+          type: 'medical',
+          title,
+          startTime: visit.visitDate,
+          note: visit.diagnosisNote ?? '',
+          done: true,
+        });
+        visit.calendarEventId = event._id as any;
+      }
+    } else if (syncToCalendar === false && visit.calendarEventId) {
+      await CalendarEvent.findByIdAndDelete(visit.calendarEventId);
+      visit.calendarEventId = undefined;
+    }
+
+    await visit.save();
+    res.json({ success: true, data: formatVetVisit(visit), message: '就醫紀錄已更新' });
+  } catch (e) {
+    console.error(`[vetVisitsController] 就醫紀錄更新失敗，visitId=${visit._id}`, e);
+    res.status(500).json({ success: false, data: null, message: '就醫紀錄更新失敗，請稍後再試' });
+  }
+}
+
 export async function deleteVetVisit(req: AuthRequest, res: Response): Promise<void> {
   const pet = await Pet.findOne({ _id: req.params.id, userId: req.userId });
   if (!pet) {
@@ -419,6 +486,12 @@ export async function deleteVetVisit(req: AuthRequest, res: Response): Promise<v
   if (visit.imageUrl) {
     await deleteImageByUrl(visit.imageUrl).catch((e) =>
       console.error(`[vetVisitsController] 報告圖片刪除失敗，visitId=${visit._id}`, e)
+    );
+  }
+  // 同步建立的行事曆事件要一起清掉，否則會留下指向已刪除紀錄的孤兒事件
+  if (visit.calendarEventId) {
+    await CalendarEvent.findByIdAndDelete(visit.calendarEventId).catch((e) =>
+      console.error(`[vetVisitsController] 行事曆事件刪除失敗，visitId=${visit._id}`, e)
     );
   }
   res.json({ success: true, data: null, message: '就醫紀錄已刪除' });

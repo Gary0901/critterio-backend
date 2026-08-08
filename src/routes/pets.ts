@@ -9,7 +9,8 @@ import {
   getAiCare,
 } from '../controllers/petsController';
 import {
-  parseVisitReport, getVisitParseJob, createVetVisit, getVetVisits, getVetVisit, deleteVetVisit,
+  parseVisitReport, getVisitParseJob, createVetVisit, getVetVisits, getVetVisit,
+  updateVetVisit, deleteVetVisit,
 } from '../controllers/vetVisitsController';
 
 const router = Router();
@@ -36,6 +37,7 @@ router.get('/:id/vet-visits/parse-jobs/:jobId', getVisitParseJob);
 router.post('/:id/vet-visits', createVetVisit);
 router.get('/:id/vet-visits', getVetVisits);
 router.get('/:id/vet-visits/:visitId', getVetVisit);
+router.patch('/:id/vet-visits/:visitId', updateVetVisit);
 router.delete('/:id/vet-visits/:visitId', deleteVetVisit);
 
 export default router;
