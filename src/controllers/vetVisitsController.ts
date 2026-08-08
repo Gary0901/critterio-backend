@@ -40,6 +40,11 @@ const EXTRACTION_SYSTEM_PROMPT = `你是專業的獸醫數據解析助手。使�
 8. 若整張報告的結果欄都是空的（例如尚未填寫的空白檢驗單、日期還是 ____年__月__日 這種填空底線），
    items 必須回傳空陣列 []，且 resultColumnHasPrintedValues 必須為 false。`;
 
+// 滾動 7 天內每位使用者可解析的報告張數。
+// 一次看診常常拿到多張（血球＋生化就是 2 張），照片拍歪重傳也很常見，
+// 所以不能訂得太緊；但也要壓住最壞成本（8 × $0.07 ≈ $0.58／人／週）。
+const WEEKLY_PARSE_LIMIT = 8;
+
 const EXTRACTION_JSON_SCHEMA = {
   name: 'lab_result_extraction',
   schema: {
@@ -51,6 +56,12 @@ const EXTRACTION_JSON_SCHEMA = {
       resultColumnHasPrintedValues: {
         type: 'boolean',
         description: '這張報告的「檢驗結果」欄位是否真的印有實際數值。若整欄空白、只印了項目名稱與參考範圍（例如尚未填寫的空白檢驗單），必須回 false。',
+      },
+      // 先數再抽，數出來的總數拿來跟實際抽到的項目數交叉比對。
+      // 漏行本身沒有任何可辨識的信號，這是唯一能自動察覺遺漏的方法
+      totalRowsWithValues: {
+        type: 'integer',
+        description: '先仔細數過整張報告，「檢驗結果」欄位有印出實際數值的列總共有幾列。這個數字要獨立計算，不受你實際抽出幾項影響。',
       },
       items: {
         type: 'array',
@@ -69,7 +80,7 @@ const EXTRACTION_JSON_SCHEMA = {
         },
       },
     },
-    required: ['reportType', 'resultColumnHasPrintedValues', 'items'],
+    required: ['reportType', 'resultColumnHasPrintedValues', 'totalRowsWithValues', 'items'],
     additionalProperties: false,
   },
   strict: true,
@@ -120,11 +131,22 @@ function looksFabricatedFromRefRange(items: ExtractedItem[]): boolean {
 async function extractItemsFromImage(
   imageUrl: string,
   speciesLabel: string
-): Promise<{ reportType: string; resultColumnHasPrintedValues: boolean; items: ExtractedItem[] }> {
+): Promise<{
+  reportType: string;
+  resultColumnHasPrintedValues: boolean;
+  possiblyIncomplete: boolean;
+  items: ExtractedItem[];
+}> {
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    // 一份 24 項的血球報告，光是 items 陣列（含中文項目名）就可能吃掉 1700+ tokens，
-    // 2048 太貼邊。max_tokens 只是上限、按實際用量計費，開大不會增加成本
+    // 抽取用完整版 gpt-4o：實測 gpt-4o-mini 在 test4（16 項）只抽到 9 項，
+    // finish_reason=stop（不是截斷）、prompt_tokens=26601（圖片已高解析讀取），
+    // 純粹是 mini 的密集表格 OCR 能力不足。漏行沒有任何可辨識的信號——
+    // 使用者看到的每個數值都對，只是不完整，人工複核也擋不住，
+    // 對醫療數據來說比多花錢嚴重得多。
+    // 注意：白話解釋那次呼叫維持 gpt-4o-mini，那是生成文字、不需要視覺精度。
+    model: 'gpt-4o',
+    // 一份 24 項的血球報告，光是 items 陣列（含中文項目名）就可能吃掉 1700+ tokens。
+    // max_tokens 只是上限、按實際用量計費，開大不會增加成本
     max_tokens: 4096,
     messages: [
       { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
@@ -156,6 +178,7 @@ async function extractItemsFromImage(
   const parsed = JSON.parse(raw) as {
     reportType: string;
     resultColumnHasPrintedValues?: boolean;
+    totalRowsWithValues?: number;
     items: ExtractedItem[];
   };
 
@@ -167,13 +190,29 @@ async function extractItemsFromImage(
       `[vetVisitsController] 判定為空白/捏造報告，丟棄 ${parsed.items?.length ?? 0} 筆結果` +
       `（模型自述結果欄為空=${declaredEmpty}，貼齊參考範圍特徵點=${fabricated}）`
     );
-    return { reportType: parsed.reportType, resultColumnHasPrintedValues: false, items: [] };
+    return {
+      reportType: parsed.reportType,
+      resultColumnHasPrintedValues: false,
+      possiblyIncomplete: false,
+      items: [],
+    };
   }
 
-  console.log(`[vetVisitsController] 抽取到 ${parsed.items?.length ?? 0} 個項目`);
+  // 交叉比對：模型自己數出的列數 vs 實際抽出的項目數。
+  // 漏行不像捏造有可辨識的樣態，使用者看到的每個數值都是對的、只是不完整，
+  // 這是唯一能自動察覺遺漏的訊號。不擋存檔，只提醒使用者對照紙本
+  const extracted = parsed.items?.length ?? 0;
+  const claimedTotal = parsed.totalRowsWithValues ?? 0;
+  const possiblyIncomplete = claimedTotal > 0 && extracted < claimedTotal;
+  console.log(
+    `[vetVisitsController] 抽取到 ${extracted} 個項目（模型自述整張共 ${claimedTotal} 列有數值）` +
+    (possiblyIncomplete ? ` ⚠️ 疑似漏抓 ${claimedTotal - extracted} 列` : '')
+  );
+
   return {
     reportType: parsed.reportType,
     resultColumnHasPrintedValues: true,
+    possiblyIncomplete,
     items: parsed.items ?? [],
   };
 }
@@ -307,7 +346,7 @@ async function runParseJob(
 ): Promise<void> {
   const notifData = { petId, petName, jobId };
   try {
-    const { reportType, items } = await extractItemsFromImage(imageUrl, speciesLabel);
+    const { reportType, items, possiblyIncomplete } = await extractItemsFromImage(imageUrl, speciesLabel);
     const { items: itemsWithExplanation, summaryAdvice } = await generateExplanations(
       species, speciesLabel, reportType, items
     );
@@ -332,6 +371,11 @@ async function runParseJob(
       reportType,
       items: itemsWithExplanation,
       summaryAdvice,
+      // 抽出的項目數少於模型自己數出的列數 → 提醒使用者對照紙本。
+      // 不擋存檔，因為抽到的資料本身是對的，只是可能不完整
+      warningMessage: possiblyIncomplete
+        ? '部分項目可能未被辨識，請對照紙本報告確認是否有遺漏。'
+        : '',
     });
     await sendNotification({
       recipientUserId: userId,
@@ -364,6 +408,25 @@ export async function parseVisitReport(req: AuthRequest, res: Response): Promise
   }
   if (!req.file) {
     res.status(400).json({ success: false, data: null, message: '報告照片為必填' });
+    return;
+  }
+
+  // 滾動 7 天的用量上限。單次解析用 gpt-4o 的視覺辨識，成本約 $0.07——
+  // 光靠 rateLimit.ts 的每日 5 次不夠（5×30 = 150 次/月 ≈ $10.8／人），
+  // 而且 express-rate-limit 存在記憶體，每次重新部署就歸零。
+  // 這裡直接數 VisitParseJob（有 userId 與 createdAt），計數在資料庫、重啟不受影響。
+  // 選 7 天是因為 VisitParseJob 本身就是 7 天 TTL，再長的窗口資料已經被清掉了。
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const recentParses = await VisitParseJob.countDocuments({
+    userId: req.userId,
+    createdAt: { $gte: weekAgo },
+  });
+  if (recentParses >= WEEKLY_PARSE_LIMIT) {
+    res.status(429).json({
+      success: false,
+      data: null,
+      message: `最近 7 天的報告解析次數已達上限（${WEEKLY_PARSE_LIMIT} 次），請過幾天再試。你仍然可以手動新增就醫紀錄。`,
+    });
     return;
   }
 
@@ -415,6 +478,7 @@ export async function getVisitParseJob(req: AuthRequest, res: Response): Promise
       items: job.items ?? [],
       summaryAdvice: job.summaryAdvice ?? '',
       errorMessage: job.errorMessage ?? '',
+      warningMessage: job.warningMessage ?? '',
     },
     message: '',
   });

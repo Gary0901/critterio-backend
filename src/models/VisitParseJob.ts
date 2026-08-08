@@ -10,6 +10,8 @@ export interface IVisitParseJob extends Document {
   items: LabResultItem[];
   summaryAdvice?: string;
   errorMessage?: string;
+  // 解析成功、但抽出的項目數少於模型自己數出的列數時的提醒（不是錯誤，資料仍可用）
+  warningMessage?: string;
   createdAt: Date;
 }
 
@@ -31,8 +33,9 @@ const VisitParseJobSchema = new Schema<IVisitParseJob>(
         plainExplanation: { type: String, default: '' },
       },
     ],
-    summaryAdvice: { type: String, default: '' },
-    errorMessage:  { type: String, default: '' },
+    summaryAdvice:  { type: String, default: '' },
+    errorMessage:   { type: String, default: '' },
+    warningMessage: { type: String, default: '' },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
