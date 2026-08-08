@@ -6,6 +6,12 @@ import Favorite from '../models/Favorite';
 
 const GOOGLE_KEY = process.env.GOOGLE_GEOCODING_KEY ?? '';
 
+// 單次地圖查詢回傳的地點上限。`$near` 本身依距離由近到遠排序，
+// 所以這是「最近的 N 家」而不是隨機截斷。
+// 原本是 100，但一個地圖畫面根本看不完，而 marker 數量直接決定
+// react-native-map-clustering 的重算成本，是切換分類卡頓的主因之一
+const NEARBY_LIMIT = 60;
+
 // ─── Places ───────────────────────────────────────────────────────────────────
 
 export async function searchNearby(req: AuthRequest, res: Response): Promise<void> {
@@ -29,7 +35,7 @@ export async function searchNearby(req: AuthRequest, res: Response): Promise<voi
   // 收藏清單跟這次的地點搜尋結果無關（不需要等地點查完才知道要查哪些 placeId），
   // 直接平行查詢，改成依序查詢會白白多等一次資料庫往返
   const [places, favs] = await Promise.all([
-    Place.find(filter).limit(100).lean(),
+    Place.find(filter).limit(NEARBY_LIMIT).lean(),
     Favorite.find({ userId: req.userId }).select('placeId').lean(),
   ]);
   const favSet = new Set(favs.map((f) => String(f.placeId)));
@@ -48,7 +54,10 @@ export async function searchNearby(req: AuthRequest, res: Response): Promise<voi
     is24Hours: p.is24Hours ?? false,
     exoticFriendly: p.exoticFriendly ?? false,
     photoUrl: p.photoUrls?.[0] ?? undefined,
-    photoRef: p.photoRefs?.[0] ?? undefined,
+    // 只在沒有 Cloudinary 圖片時才回傳 Google 的 photoRef 當備援。
+    // photoRef 單筆就 400+ bytes，而 98% 的地點早就有 photoUrl，
+    // 無條件回傳會讓每次查詢多背 40% 的無用流量
+    photoRef: p.photoUrls?.[0] ? undefined : (p.photoRefs?.[0] ?? undefined),
   }));
   res.json({ success: true, data, message: '' });
 }
@@ -117,7 +126,7 @@ export async function getFavorites(req: AuthRequest, res: Response): Promise<voi
         is24Hours: p.is24Hours ?? false,
         exoticFriendly: p.exoticFriendly ?? false,
         photoUrl: p.photoUrls?.[0] ?? undefined,
-        photoRef: p.photoRefs?.[0] ?? undefined,
+        photoRef: p.photoUrls?.[0] ? undefined : (p.photoRefs?.[0] ?? undefined),
         lat: p.location.coordinates[1],
         lng: p.location.coordinates[0],
         isFavorite: true,
