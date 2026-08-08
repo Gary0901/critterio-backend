@@ -33,7 +33,12 @@ const EXTRACTION_SYSTEM_PROMPT = `你是專業的獸醫數據解析助手。使�
 3. status 的判定必須完全依照報告單上印出的參考範圍（reference range）。如果該項目報告單上沒有印出參考範圍，一律回傳 status: "UNKNOWN"，絕對不可以套用你自己知道的通用標準去猜測高低。
 4. refRange 請照報告單上印出的原始文字填入；沒有印出就留空字串。
 5. abbreviation 若報告單上有印出縮寫（如 ALT、BUN）就填入，沒有就留空字串。
-6. value 請填數字（去除單位），unit 填該項目的單位。`;
+6. value 請填數字（去除單位），unit 填該項目的單位。
+7. ⚠️ **特別禁止這個具體錯誤：把參考範圍的下界（或上界、或中間值）當成檢驗結果填進 value**。
+   例如看到「RBC　6.54 - 12.20」而結果欄是空白的，就回傳 value: 6.54——這是嚴重錯誤，實測發生過。
+   正確做法是**完全不要回傳 RBC 這一項**。
+8. 若整張報告的結果欄都是空的（例如尚未填寫的空白檢驗單、日期還是 ____年__月__日 這種填空底線），
+   items 必須回傳空陣列 []，且 resultColumnHasPrintedValues 必須為 false。`;
 
 const EXTRACTION_JSON_SCHEMA = {
   name: 'lab_result_extraction',
@@ -41,6 +46,12 @@ const EXTRACTION_JSON_SCHEMA = {
     type: 'object',
     properties: {
       reportType: { type: 'string', description: '報告類型英文代碼，例如 blood_biochemistry、cbc、urinalysis、unknown' },
+      // 獨立問一次「結果欄到底有沒有印數字」。同一次呼叫不增加成本，
+      // 而且這是個是非題，比要求模型「自我克制不要填 items」可靠
+      resultColumnHasPrintedValues: {
+        type: 'boolean',
+        description: '這張報告的「檢驗結果」欄位是否真的印有實際數值。若整欄空白、只印了項目名稱與參考範圍（例如尚未填寫的空白檢驗單），必須回 false。',
+      },
       items: {
         type: 'array',
         items: {
@@ -58,16 +69,58 @@ const EXTRACTION_JSON_SCHEMA = {
         },
       },
     },
-    required: ['reportType', 'items'],
+    required: ['reportType', 'resultColumnHasPrintedValues', 'items'],
     additionalProperties: false,
   },
   strict: true,
 } as const;
 
+/** 把 "6.54 - 12.20"、"0.0-0.9" 這類參考範圍字串解析成上下界 */
+function parseRefRange(refRange?: string): { min: number; max: number } | null {
+  if (!refRange) return null;
+  const m = refRange.replace(/\s/g, '').match(/^(-?\d+(?:\.\d+)?)[-–~](-?\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const min = parseFloat(m[1]);
+  const max = parseFloat(m[2]);
+  if (isNaN(min) || isNaN(max) || max <= min) return null;
+  return { min, max };
+}
+
+/**
+ * 偵測「模型是照著參考範圍編數字」的樣態。
+ *
+ * 實測（2026-08-08，空白 ProCyte One 檢驗單）：模型不會老實回空陣列，
+ * 而是把每一項的**參考區間最小值**當成結果填進去，回了 23 項。
+ * 這種捏造最難察覺——每個數字都落在合理範圍內，看起來就像一份「指標偏低但正常」的真報告。
+ *
+ * 真實報告不可能大量出現數值剛好等於參考上下界或正中央的情況，
+ * 所以用「可比對項目中有多高比例貼齊特徵點」當判準。
+ */
+function looksFabricatedFromRefRange(items: ExtractedItem[]): boolean {
+  const comparable = items
+    .map((it) => ({ value: it.value, range: parseRefRange(it.refRange) }))
+    .filter((x): x is { value: number; range: { min: number; max: number } } => x.range !== null);
+
+  // 樣本太少時比例不具意義（兩三項剛好貼邊是有可能的）
+  if (comparable.length < 5) return false;
+
+  const EPS = 1e-6;
+  const hits = comparable.filter(({ value, range }) => {
+    const mid = (range.min + range.max) / 2;
+    return (
+      Math.abs(value - range.min) < EPS ||
+      Math.abs(value - range.max) < EPS ||
+      Math.abs(value - mid) < EPS
+    );
+  }).length;
+
+  return hits / comparable.length >= 0.6;
+}
+
 async function extractItemsFromImage(
   imageUrl: string,
   speciesLabel: string
-): Promise<{ reportType: string; items: ExtractedItem[] }> {
+): Promise<{ reportType: string; resultColumnHasPrintedValues: boolean; items: ExtractedItem[] }> {
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
     max_tokens: 2048,
@@ -84,9 +137,30 @@ async function extractItemsFromImage(
     response_format: { type: 'json_schema', json_schema: EXTRACTION_JSON_SCHEMA },
   });
 
-  const raw = completion.choices[0]?.message?.content ?? '{"reportType":"unknown","items":[]}';
-  const parsed = JSON.parse(raw) as { reportType: string; items: ExtractedItem[] };
-  return parsed;
+  const raw = completion.choices[0]?.message?.content
+    ?? '{"reportType":"unknown","resultColumnHasPrintedValues":false,"items":[]}';
+  const parsed = JSON.parse(raw) as {
+    reportType: string;
+    resultColumnHasPrintedValues?: boolean;
+    items: ExtractedItem[];
+  };
+
+  // 兩道防線，任一觸發就整批丟棄——寧可要使用者重拍，也不能讓捏造的醫療數值落庫
+  const declaredEmpty = parsed.resultColumnHasPrintedValues === false;
+  const fabricated = looksFabricatedFromRefRange(parsed.items ?? []);
+  if (declaredEmpty || fabricated) {
+    console.warn(
+      `[vetVisitsController] 判定為空白/捏造報告，丟棄 ${parsed.items?.length ?? 0} 筆結果` +
+      `（模型自述結果欄為空=${declaredEmpty}，貼齊參考範圍特徵點=${fabricated}）`
+    );
+    return { reportType: parsed.reportType, resultColumnHasPrintedValues: false, items: [] };
+  }
+
+  return {
+    reportType: parsed.reportType,
+    resultColumnHasPrintedValues: true,
+    items: parsed.items ?? [],
+  };
 }
 
 // ─── 白話文解釋生成（鳥類/爬蟲類異常值先查 RAG 佐證）─────────────────────────────
