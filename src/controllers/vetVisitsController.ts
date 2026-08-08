@@ -123,7 +123,9 @@ async function extractItemsFromImage(
 ): Promise<{ reportType: string; resultColumnHasPrintedValues: boolean; items: ExtractedItem[] }> {
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
-    max_tokens: 2048,
+    // 一份 24 項的血球報告，光是 items 陣列（含中文項目名）就可能吃掉 1700+ tokens，
+    // 2048 太貼邊。max_tokens 只是上限、按實際用量計費，開大不會增加成本
+    max_tokens: 4096,
     messages: [
       { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },
       {
@@ -136,6 +138,18 @@ async function extractItemsFromImage(
     ],
     response_format: { type: 'json_schema', json_schema: EXTRACTION_JSON_SCHEMA },
   });
+
+  // 診斷用：漏項時要能分辨是「輸出被截斷」還是「模型根本沒讀出來」，
+  // 這兩者症狀一樣（都是少幾列）但解法完全不同
+  const finishReason = completion.choices[0]?.finish_reason;
+  console.log(
+    `[vetVisitsController] 抽取完成 finish_reason=${finishReason} ` +
+    `completion_tokens=${completion.usage?.completion_tokens} ` +
+    `prompt_tokens=${completion.usage?.prompt_tokens}`
+  );
+  if (finishReason === 'length') {
+    console.warn('[vetVisitsController] ⚠️ 輸出被 max_tokens 截斷，項目可能不完整');
+  }
 
   const raw = completion.choices[0]?.message?.content
     ?? '{"reportType":"unknown","resultColumnHasPrintedValues":false,"items":[]}';
@@ -156,6 +170,7 @@ async function extractItemsFromImage(
     return { reportType: parsed.reportType, resultColumnHasPrintedValues: false, items: [] };
   }
 
+  console.log(`[vetVisitsController] 抽取到 ${parsed.items?.length ?? 0} 個項目`);
   return {
     reportType: parsed.reportType,
     resultColumnHasPrintedValues: true,
