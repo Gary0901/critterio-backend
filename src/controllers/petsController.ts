@@ -30,10 +30,26 @@ function formatPet(pet: any) {
     heightCm: pet.heightCm ?? 0,
     gender: pet.gender,
     photoUrl: pet.photoUrl ?? null,
+    color: pet.color ?? null,
     traits: pet.traits,
     careTargets: pet.careTargets,
     createdAt: pet.createdAt,
   };
+}
+
+/**
+ * 寵物識別色調色盤長度。跟 frontend/src/constants/petColors.ts 綁在一起 ——
+ * 那邊加色的話這裡要一起改。
+ */
+const PET_COLOR_COUNT = 8;
+
+/** 挑一個這位使用者還沒用過的顏色。全滿了（理論上不會，寵物有上限）就從頭循環 */
+function pickFreeColor(used: (number | undefined | null)[]): number {
+  const taken = new Set(used.filter((c): c is number => typeof c === 'number'));
+  for (let i = 0; i < PET_COLOR_COUNT; i++) {
+    if (!taken.has(i)) return i;
+  }
+  return used.length % PET_COLOR_COUNT;
 }
 
 // ─── Pet CRUD ─────────────────────────────────────────────────────────────────
@@ -47,7 +63,9 @@ export async function createPet(req: AuthRequest, res: Response): Promise<void> 
     return;
   }
 
-  const petCount = await Pet.countDocuments({ userId: req.userId });
+  // 需要既有寵物的顏色來避開重複，順便取代原本的 countDocuments
+  const existing = await Pet.find({ userId: req.userId }).select('color').lean();
+  const petCount = existing.length;
   if (petCount >= FREE_PET_LIMIT) {
     res.status(403).json({ success: false, data: null, message: `免費方案最多新增 ${FREE_PET_LIMIT} 隻寵物` });
     return;
@@ -68,6 +86,7 @@ export async function createPet(req: AuthRequest, res: Response): Promise<void> 
     photoUrl,
     traits: [],
     careTargets: [],
+    color: pickFreeColor(existing.map((p: any) => p.color)),
     order: petCount,
   });
   res.status(201).json({ success: true, data: formatPet(pet), message: '建立成功' });
@@ -75,6 +94,19 @@ export async function createPet(req: AuthRequest, res: Response): Promise<void> 
 
 export async function getPets(req: AuthRequest, res: Response): Promise<void> {
   const pets = await Pet.find({ userId: req.userId }).sort({ order: 1, createdAt: 1 });
+
+  // color 是後來才加的欄位，舊寵物沒有值。在這裡補齊並存回去，
+  // 就不需要另外跑一支 migration，而且只會發生一次。
+  const missing = pets.filter((p) => typeof p.color !== 'number');
+  if (missing.length > 0) {
+    const used = pets.map((p) => p.color);
+    for (const pet of missing) {
+      pet.color = pickFreeColor(used);
+      used.push(pet.color);
+    }
+    await Promise.all(missing.map((p) => p.save()));
+  }
+
   res.json({ success: true, data: pets.map(formatPet), message: '' });
 }
 
@@ -114,6 +146,28 @@ export async function updatePet(req: AuthRequest, res: Response): Promise<void> 
   if (req.body.joinedFamilyAt) updates.joinedFamilyAt = new Date(req.body.joinedFamilyAt);
   if (req.file) {
     updates.photoUrl = await uploadImage(req.file.buffer, 'critterio/pets');
+  }
+
+  // multipart 的欄位一律是字串，不能直接用 typeof 判斷
+  if (req.body.color !== undefined && req.body.color !== null && req.body.color !== '') {
+    const idx = Number(req.body.color);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= PET_COLOR_COUNT) {
+      res.status(400).json({ success: false, data: null, message: '顏色索引不正確' });
+      return;
+    }
+    const clash = await Pet.findOne({
+      userId: req.userId,
+      _id: { $ne: req.params.id },
+      color: idx,
+    }).select('name').lean();
+    if (clash) {
+      res.status(409).json({
+        success: false, data: null,
+        message: `這個顏色已經是「${(clash as any).name}」的了，請換一個`,
+      });
+      return;
+    }
+    updates.color = idx;
   }
 
   const pet = await Pet.findOneAndUpdate(

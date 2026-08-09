@@ -20,6 +20,12 @@ export interface IPet extends Document {
   photoUrl?: string;
   traits: string[];
   careTargets: CareTarget[];
+  /**
+   * 識別色在調色盤中的索引（色條、行事曆標籤）。建立時自動配一個未使用的，
+   * 之後使用者可以改。存索引而非 hex —— 每個佈景主題對同一索引有各自調過的值。
+   * 調色盤定義在 frontend/src/constants/petColors.ts。
+   */
+  color?: number;
   order: number;
   createdAt: Date;
 }
@@ -37,6 +43,7 @@ const PetSchema = new Schema<IPet>(
     heightCm: { type: Number, default: 0 },
     photoUrl: { type: String },
     traits:   [{ type: String }],
+    color:    { type: Number, min: 0, max: 7 },
     order:    { type: Number, default: 0 },
     careTargets: [
       {
