@@ -146,6 +146,30 @@ async function syncPetAnniversaries(pet: any): Promise<void> {
   if (docs.length > 0) await CalendarEvent.insertMany(docs);
 }
 
+/**
+ * 檢查出生日與加入家庭日的合理性。
+ *
+ * 這兩個欄位會餵給 syncPetAnniversaries()，爛資料會直接變成
+ * 「加入家庭 -3 週年」這種事件，所以必須在寫入前擋掉。
+ *
+ * updatePet 可能只改其中一個，所以呼叫端要把「更新後的完整值」傳進來，
+ * 不能只驗這次送來的那個。
+ */
+function validatePetDates(birthday?: Date | null, joinedFamilyAt?: Date | null): string | null {
+  // 允許今天，用當天結束當上限，避免時區把「今天」判成未來
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+
+  if (birthday && isNaN(birthday.getTime())) return '出生日期格式不正確';
+  if (joinedFamilyAt && isNaN(joinedFamilyAt.getTime())) return '加入家庭日期格式不正確';
+  if (birthday && birthday > endOfToday) return '出生日期不能是未來';
+  if (joinedFamilyAt && joinedFamilyAt > endOfToday) return '加入家庭日期不能是未來';
+  if (birthday && joinedFamilyAt && joinedFamilyAt < birthday) {
+    return '加入家庭日期不能早於出生日期';
+  }
+  return null;
+}
+
 // ─── Pet CRUD ─────────────────────────────────────────────────────────────────
 
 const FREE_PET_LIMIT = 3;
@@ -154,6 +178,14 @@ export async function createPet(req: AuthRequest, res: Response): Promise<void> 
   const { name, species, breed, birthday, joinedFamilyAt, gender, weight } = req.body;
   if (!name || !species || !gender || weight == null) {
     res.status(400).json({ success: false, data: null, message: 'name、species、gender、weight 為必填' });
+    return;
+  }
+
+  const birthdayDate = birthday ? new Date(birthday) : undefined;
+  const joinedDate = joinedFamilyAt ? new Date(joinedFamilyAt) : undefined;
+  const dateError = validatePetDates(birthdayDate, joinedDate);
+  if (dateError) {
+    res.status(400).json({ success: false, data: null, message: dateError });
     return;
   }
 
@@ -174,8 +206,8 @@ export async function createPet(req: AuthRequest, res: Response): Promise<void> 
     userId: req.userId,
     name, species,
     breed: breed ?? '',
-    birthday:       birthday       ? new Date(birthday)       : undefined,
-    joinedFamilyAt: joinedFamilyAt ? new Date(joinedFamilyAt) : undefined,
+    birthday: birthdayDate,
+    joinedFamilyAt: joinedDate,
     gender, weight,
     photoUrl,
     traits: [],
@@ -240,6 +272,21 @@ export async function updatePet(req: AuthRequest, res: Response): Promise<void> 
   }
   if (req.body.birthday)       updates.birthday       = new Date(req.body.birthday);
   if (req.body.joinedFamilyAt) updates.joinedFamilyAt = new Date(req.body.joinedFamilyAt);
+  // 只改其中一個日期時，要跟資料庫現有的另一個一起驗，否則驗不出交叉錯誤
+  if (updates.birthday || updates.joinedFamilyAt) {
+    const current = await Pet.findOne({ _id: req.params.id, userId: req.userId })
+      .select('birthday joinedFamilyAt')
+      .lean();
+    const dateError = validatePetDates(
+      updates.birthday ?? (current as any)?.birthday,
+      updates.joinedFamilyAt ?? (current as any)?.joinedFamilyAt,
+    );
+    if (dateError) {
+      res.status(400).json({ success: false, data: null, message: dateError });
+      return;
+    }
+  }
+
   if (req.file) {
     // 換照片時要把舊的刪掉，否則 Cloudinary 會累積沒人引用的圖。
     // 先查舊值再上傳，刪除失敗不擋流程。
