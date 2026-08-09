@@ -17,7 +17,7 @@ import CalendarEvent from '../models/CalendarEvent';
 import AiConversation from '../models/AiConversation';
 import Notification from '../models/Notification';
 import { AuthRequest } from '../middleware/auth';
-import { uploadImage } from '../utils/cloudinary';
+import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -315,8 +315,18 @@ export async function updateProfile(req: AuthRequest, res: Response): Promise<vo
     user.profile.lastNameChangedAt = new Date();
   }
 
-  if (req.file) {
+  // 移除照片。multipart 的欄位是字串，所以比對 'true'
+  if (req.body.removeAvatar === 'true' || req.body.removeAvatar === true) {
+    if (user.profile.avatarUrl) {
+      // 先刪雲端再清欄位；刪失敗不擋流程，最多留一張沒人引用的圖
+      await deleteImageByUrl(user.profile.avatarUrl).catch(() => {});
+    }
+    user.profile.avatarUrl = undefined;
+  } else if (req.file) {
+    // 換新照片時把舊的一起刪掉，不然 Cloudinary 會越積越多
+    const old = user.profile.avatarUrl;
     user.profile.avatarUrl = await uploadImage(req.file.buffer, 'critterio/avatars');
+    if (old) await deleteImageByUrl(old).catch(() => {});
   }
 
   // multipart 表單的欄位一律是字串，所以不能直接用 typeof === 'number' 判斷
