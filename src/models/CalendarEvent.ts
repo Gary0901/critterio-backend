@@ -11,6 +11,11 @@ export interface ICalendarEvent extends Document {
   done: boolean;
   repeat: 'none' | 'daily' | 'weekly' | 'monthly';
   recurringId?: string;
+  /**
+   * 由寵物的生日／加入家庭日自動產生的紀念事件。有值代表這筆是系統建立的，
+   * 使用者改生日時要能整批刪掉重建 —— 沒有這個標記就分不出哪些能動。
+   */
+  autoKind?: 'birthday' | 'birthMilestone' | 'family' | 'familyMilestone';
   createdAt: Date;
 }
 
@@ -26,6 +31,7 @@ const CalendarEventSchema = new Schema<ICalendarEvent>(
     done:        { type: Boolean, default: false },
     repeat:      { type: String, enum: ['none', 'daily', 'weekly', 'monthly'], default: 'none' },
     recurringId: { type: String },
+    autoKind:    { type: String, index: true },
   },
   { timestamps: true }
 );

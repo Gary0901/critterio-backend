@@ -52,6 +52,88 @@ function pickFreeColor(used: (number | undefined | null)[]): number {
   return used.length % PET_COLOR_COUNT;
 }
 
+/** 生日／加入家庭的週年要建幾年份。repeat 沒有 'yearly'，只能逐年建立 */
+const ANNIVERSARY_YEARS = 5;
+/**
+ * 里程碑天數。兩組相同 —— 出生和加入家庭都用同一套節奏，
+ * 使用者比較好預期，也省得記兩種規則。
+ * 2000 天約 5.5 年，跟 ANNIVERSARY_YEARS 的涵蓋範圍差不多。
+ */
+const MILESTONE_DAYS = [100, 300, 500, 1000, 1500, 2000];
+const BIRTH_MILESTONE_DAYS = MILESTONE_DAYS;
+const FAMILY_MILESTONE_DAYS = MILESTONE_DAYS;
+
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d);
+  r.setDate(r.getDate() + n);
+  return r;
+}
+
+/** 當地時間的當天早上 9 點 —— 全天事件也要有時間，不然排序會跑到最前面 */
+function atMorning(d: Date): Date {
+  const r = new Date(d);
+  r.setHours(9, 0, 0, 0);
+  return r;
+}
+
+/**
+ * 依寵物的 birthday / joinedFamilyAt 重建所有自動紀念事件。
+ *
+ * 先刪後建（用 autoKind 篩選），所以使用者改了生日就會自動同步，
+ * 而且不會動到他自己建立的事件。
+ * 已經過去的里程碑不建 —— 那對使用者沒有意義，只會塞滿歷史月份。
+ */
+async function syncPetAnniversaries(pet: any): Promise<void> {
+  await CalendarEvent.deleteMany({ petId: pet._id, autoKind: { $exists: true } });
+
+  const now = Date.now();
+  const docs: any[] = [];
+  const push = (title: string, when: Date, autoKind: string) => {
+    if (when.getTime() < now) return; // 過去的不建
+    docs.push({
+      userId: pet.userId,
+      petId: pet._id,
+      title,
+      type: 'other',
+      startTime: atMorning(when),
+      done: false,
+      repeat: 'none',
+      autoKind,
+    });
+  };
+
+  if (pet.birthday) {
+    const b = new Date(pet.birthday);
+    const thisYear = new Date().getFullYear();
+    for (let i = 0; i <= ANNIVERSARY_YEARS; i++) {
+      const d = new Date(b);
+      d.setFullYear(thisYear + i);
+      const age = thisYear + i - b.getFullYear();
+      push(`${pet.name} ${age} 歲生日 🎂`, d, 'birthday');
+    }
+    for (const n of BIRTH_MILESTONE_DAYS) {
+      push(`${pet.name} 出生第 ${n} 天`, addDays(b, n), 'birthMilestone');
+    }
+  }
+
+  if (pet.joinedFamilyAt) {
+    const j = new Date(pet.joinedFamilyAt);
+    const thisYear = new Date().getFullYear();
+    for (let i = 0; i <= ANNIVERSARY_YEARS; i++) {
+      const d = new Date(j);
+      d.setFullYear(thisYear + i);
+      const years = thisYear + i - j.getFullYear();
+      if (years <= 0) continue;
+      push(`${pet.name} 加入家庭 ${years} 週年 🏠`, d, 'family');
+    }
+    for (const n of FAMILY_MILESTONE_DAYS) {
+      push(`${pet.name} 加入家庭第 ${n} 天`, addDays(j, n), 'familyMilestone');
+    }
+  }
+
+  if (docs.length > 0) await CalendarEvent.insertMany(docs);
+}
+
 // ─── Pet CRUD ─────────────────────────────────────────────────────────────────
 
 const FREE_PET_LIMIT = 3;
@@ -89,6 +171,8 @@ export async function createPet(req: AuthRequest, res: Response): Promise<void> 
     color: pickFreeColor(existing.map((p: any) => p.color)),
     order: petCount,
   });
+  // 紀念事件失敗不該讓建立寵物整個失敗
+  await syncPetAnniversaries(pet).catch(() => {});
   res.status(201).json({ success: true, data: formatPet(pet), message: '建立成功' });
 }
 
@@ -183,6 +267,10 @@ export async function updatePet(req: AuthRequest, res: Response): Promise<void> 
   if (!pet) {
     res.status(404).json({ success: false, data: null, message: '找不到寵物' });
     return;
+  }
+  // 只有日期或名字變了才重建 —— 名字也要，因為事件標題帶了寵物名
+  if (updates.birthday || updates.joinedFamilyAt || updates.name) {
+    await syncPetAnniversaries(pet).catch(() => {});
   }
   res.json({ success: true, data: formatPet(pet), message: '更新成功' });
 }
