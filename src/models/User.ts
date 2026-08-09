@@ -12,6 +12,14 @@ export interface IUser extends Document {
   profile: {
     name: string;
     avatarUrl?: string;
+    /**
+     * 沒上傳照片時，頭像圓圈底色在調色盤中的索引。
+     * 存索引而不是 hex —— 每個佈景主題對同一個索引有各自調過的色值，
+     * 存 hex 的話切到深色主題會變成一個沒調過的亮色。
+     * 調色盤定義在 frontend/src/constants/avatarColors.ts。
+     * undefined 表示沒選過，前端會依 id 雜湊自動配一個。
+     */
+    avatarColor?: number;
     lastNameChangedAt?: Date;
   };
   settings?: {
@@ -42,6 +50,7 @@ const UserSchema = new Schema<IUser>(
     profile: {
       name: { type: String, required: true },
       avatarUrl: { type: String },
+      avatarColor: { type: Number, min: 0, max: 5 },
       lastNameChangedAt: { type: Date },
     },
     settings: {

@@ -38,7 +38,7 @@ export async function getBlockedUsers(req: AuthRequest, res: Response): Promise<
     .lean();
 
   const users = await User.find({ _id: { $in: blocks.map((b) => b.blockedId) } })
-    .select('profile.name profile.avatarUrl')
+    .select('profile.name profile.avatarUrl profile.avatarColor')
     .lean();
   const userMap = new Map(users.map((u) => [String(u._id), u]));
 
@@ -50,6 +50,7 @@ export async function getBlockedUsers(req: AuthRequest, res: Response): Promise<
         id: u._id,
         name: (u as any).profile.name,
         avatarUrl: (u as any).profile.avatarUrl ?? null,
+        avatarColor: (u as any).profile.avatarColor ?? null,
         blockedAt: b.createdAt,
       };
     })

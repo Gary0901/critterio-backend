@@ -41,6 +41,7 @@ function formatUser(user: any) {
     name: user.profile.name,
     email: user.email,
     avatarUrl: user.profile.avatarUrl ?? null,
+    avatarColor: user.profile.avatarColor ?? null,
     lastNameChangedAt: user.profile.lastNameChangedAt ?? null,
     defaultPostVisibility: user.settings?.defaultPostVisibility ?? 'public',
     notifSettings: {
@@ -287,8 +288,14 @@ export async function changePassword(req: AuthRequest, res: Response): Promise<v
   res.json({ success: true, data: null, message: '密碼修改成功' });
 }
 
+/**
+ * 頭像調色盤的長度。跟 frontend/src/constants/avatarColors.ts 綁在一起 ——
+ * 那邊加色的話這裡要一起改，否則新色存不進來。
+ */
+const AVATAR_COLOR_COUNT = 6;
+
 export async function updateProfile(req: AuthRequest, res: Response): Promise<void> {
-  const { name, defaultPostVisibility } = req.body;
+  const { name, defaultPostVisibility, avatarColor } = req.body;
   const user = await User.findById(req.userId);
   if (!user) {
     res.status(404).json({ success: false, data: null, message: '找不到使用者' });
@@ -310,6 +317,16 @@ export async function updateProfile(req: AuthRequest, res: Response): Promise<vo
 
   if (req.file) {
     user.profile.avatarUrl = await uploadImage(req.file.buffer, 'critterio/avatars');
+  }
+
+  // multipart 表單的欄位一律是字串，所以不能直接用 typeof === 'number' 判斷
+  if (avatarColor !== undefined && avatarColor !== null && avatarColor !== '') {
+    const idx = Number(avatarColor);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= AVATAR_COLOR_COUNT) {
+      res.status(400).json({ success: false, data: null, message: '頭像顏色索引不正確' });
+      return;
+    }
+    user.profile.avatarColor = idx;
   }
 
   if (defaultPostVisibility === 'public' || defaultPostVisibility === 'private') {

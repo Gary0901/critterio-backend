@@ -15,8 +15,14 @@ type PostType = typeof POST_TYPES[number];
 
 async function populateUser(userId: any) {
   const user = await User.findById(userId).lean();
-  if (!user) return { id: userId, name: '未知用戶', avatarUrl: null };
-  return { id: user._id, name: (user as any).profile.name, avatarUrl: (user as any).profile.avatarUrl ?? null };
+  if (!user) return { id: userId, name: '未知用戶', avatarUrl: null, avatarColor: null };
+  return {
+    id: user._id,
+    name: (user as any).profile.name,
+    avatarUrl: (user as any).profile.avatarUrl ?? null,
+    // 沒上傳照片時前端要拿這個畫圓圈底色，不給的話別人看到的顏色會跟本人選的不一樣
+    avatarColor: (user as any).profile.avatarColor ?? null,
+  };
 }
 
 // ─── Posts ────────────────────────────────────────────────────────────────────
