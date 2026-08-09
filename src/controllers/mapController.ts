@@ -14,6 +14,16 @@ const NEARBY_LIMIT = 60;
 
 // ─── Places ───────────────────────────────────────────────────────────────────
 
+/**
+ * 合作是否仍在有效期內。partnerUntil 沒設代表無限期（互惠型合作），
+ * 有設就以日期為準 —— 到期自動失效，不用另外跑排程去清 isPartner。
+ */
+function isActivePartner(p: { isPartner?: boolean; partnerUntil?: Date | null }): boolean {
+  if (!p.isPartner) return false;
+  if (!p.partnerUntil) return true;
+  return new Date(p.partnerUntil).getTime() > Date.now();
+}
+
 export async function searchNearby(req: AuthRequest, res: Response): Promise<void> {
   const { lat, lng, type, radius = '5000', is24hr, exoticFriendly } = req.query as Record<string, string>;
   if (!lat || !lng) {
@@ -58,6 +68,16 @@ export async function searchNearby(req: AuthRequest, res: Response): Promise<voi
     // photoRef 單筆就 400+ bytes，而 98% 的地點早就有 photoUrl，
     // 無條件回傳會讓每次查詢多背 40% 的無用流量
     photoRef: p.photoUrls?.[0] ? undefined : (p.photoRefs?.[0] ?? undefined),
+
+    // 合作夥伴：到期後就當一般地點回傳，不需要另外跑清理排程
+    ...(isActivePartner(p)
+      ? {
+          isPartner: true,
+          description: p.partnerDescription ?? undefined,
+          tags: p.partnerTags?.length ? p.partnerTags : undefined,
+          photos: p.partnerPhotos?.length ? p.partnerPhotos : undefined,
+        }
+      : {}),
   }));
   res.json({ success: true, data, message: '' });
 }

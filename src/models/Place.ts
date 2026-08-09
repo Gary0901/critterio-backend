@@ -15,6 +15,16 @@ export interface IPlace extends Document {
   website?: string;
   googlePlaceId?: string;
   enriched?: boolean;
+
+  /* --- 合作夥伴 --- */
+  /** 由 scripts/seedPartners.ts 寫入，不會被 Google Places 的資料覆蓋 */
+  isPartner?: boolean;
+  partnerDescription?: string;
+  partnerTags?: string[];
+  /** 自己上傳的宣傳照，與 Google 抓來的 photoUrls 分開存 */
+  partnerPhotos?: string[];
+  /** 合作到期日。收費方案會有期限，到期後 API 就不再標記為夥伴 */
+  partnerUntil?: Date;
   location: {
     type: 'Point';
     coordinates: [number, number]; // [lng, lat]
@@ -36,6 +46,12 @@ const PlaceSchema = new Schema<IPlace>({
   website:       { type: String },
   googlePlaceId: { type: String },
   enriched:      { type: Boolean },
+
+  isPartner:          { type: Boolean, default: false, index: true },
+  partnerDescription: { type: String },
+  partnerTags:        { type: [String] },
+  partnerPhotos:      { type: [String] },
+  partnerUntil:       { type: Date },
   location: {
     type:        { type: String, enum: ['Point'], required: true },
     coordinates: { type: [Number], required: true },

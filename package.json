@@ -6,7 +6,10 @@
     "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
     "build": "tsc",
     "start": "node dist/app.js",
-    "ingest:rag": "ts-node --transpile-only scripts/ingestRagData.ts"
+    "ingest:rag": "ts-node --transpile-only scripts/ingestRagData.ts",
+    "seed:partners": "ts-node --transpile-only scripts/seedPartners.ts",
+    "find:place": "ts-node --transpile-only scripts/findPlace.ts",
+    "upload:partner-photos": "ts-node --transpile-only scripts/uploadPartnerPhotos.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
