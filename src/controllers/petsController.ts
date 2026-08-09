@@ -69,11 +69,23 @@ function addDays(d: Date, n: number): Date {
   return r;
 }
 
-/** 當地時間的當天早上 9 點 —— 全天事件也要有時間，不然排序會跑到最前面 */
-function atMorning(d: Date): Date {
-  const r = new Date(d);
-  r.setHours(9, 0, 0, 0);
-  return r;
+/**
+ * App 所在時區。跟 aiController 的 APP_TIME_ZONE 是同一件事 ——
+ * 伺服器跑在 UTC，直接 setHours(0) 存進去，使用者在台北看到的會是早上 8 點。
+ */
+const APP_UTC_OFFSET_HOURS = 8; // Asia/Taipei
+
+/**
+ * 轉成「使用者本機午夜」對應的 UTC 時間。
+ *
+ * 前端是用「本機時間的時分是不是 00:00」來判斷全天事件的（見 api/index.ts），
+ * 所以紀念日必須存成台北午夜，否則會顯示成有時間的一般事件。
+ */
+function localMidnight(d: Date): Date {
+  return new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) -
+      APP_UTC_OFFSET_HOURS * 3600 * 1000,
+  );
 }
 
 /**
@@ -94,8 +106,8 @@ async function syncPetAnniversaries(pet: any): Promise<void> {
       userId: pet.userId,
       petId: pet._id,
       title,
-      type: 'other',
-      startTime: atMorning(when),
+      type: 'anniversary',
+      startTime: localMidnight(when),
       done: false,
       repeat: 'none',
       autoKind,

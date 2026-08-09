@@ -4,7 +4,7 @@ export interface ICalendarEvent extends Document {
   userId: mongoose.Types.ObjectId;
   petId?: mongoose.Types.ObjectId;
   title: string;
-  type: 'vaccine' | 'deworm' | 'grooming' | 'medical' | 'activity' | 'other';
+  type: 'vaccine' | 'deworm' | 'grooming' | 'medical' | 'activity' | 'anniversary' | 'other';
   startTime: Date;
   endTime?: Date;
   note?: string;
@@ -24,7 +24,7 @@ const CalendarEventSchema = new Schema<ICalendarEvent>(
     userId:      { type: Schema.Types.ObjectId, ref: 'User', required: true },
     petId:       { type: Schema.Types.ObjectId, ref: 'Pet' },
     title:       { type: String, required: true },
-    type:        { type: String, enum: ['vaccine', 'deworm', 'grooming', 'medical', 'activity', 'other'], required: true },
+    type:        { type: String, enum: ['vaccine', 'deworm', 'grooming', 'medical', 'activity', 'anniversary', 'other'], required: true },
     startTime:   { type: Date, required: true },
     endTime:     { type: Date },
     note:        { type: String },
