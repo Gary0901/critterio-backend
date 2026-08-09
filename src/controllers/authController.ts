@@ -16,6 +16,7 @@ import Favorite from '../models/Favorite';
 import CalendarEvent from '../models/CalendarEvent';
 import AiConversation from '../models/AiConversation';
 import Notification from '../models/Notification';
+import VetVisit from '../models/VetVisit';
 import { AuthRequest } from '../middleware/auth';
 import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
 
@@ -402,6 +403,29 @@ export async function deleteAccount(req: AuthRequest, res: Response): Promise<vo
   for (const c of myCommentsOnOthers) {
     await Post.findByIdAndUpdate(c.postId, { $inc: { 'metrics.commentsCount': -1 } });
   }
+
+  // 先把所有雲端圖片的網址收齊，再刪資料庫紀錄 —— 順序反了就再也找不到這些圖是誰的，
+  // 會永遠留在 Cloudinary 的公開網址上。這是隱私問題，不只是儲存空間。
+  const [petDocs, petLogDocs, postDocs, vetVisitDocs, convDocs, userDoc] = await Promise.all([
+    Pet.find({ userId }).select('photoUrl').lean(),
+    PetLog.find({ petId: { $in: petIds } }).select('images').lean(),
+    Post.find({ userId }).select('images').lean(),
+    VetVisit.find({ petId: { $in: petIds } }).select('imageUrl').lean(),
+    AiConversation.find({ userId }).select('messages.imageUrl').lean(),
+    User.findById(userId).select('profile.avatarUrl').lean(),
+  ]);
+
+  const imageUrls: string[] = [
+    (userDoc as any)?.profile?.avatarUrl,
+    ...petDocs.map((p: any) => p.photoUrl),
+    ...petLogDocs.flatMap((l: any) => (l.images ?? []).map((img: any) => img.url)),
+    ...postDocs.flatMap((p: any) => p.images ?? []),
+    ...vetVisitDocs.map((v: any) => v.imageUrl),
+    ...convDocs.flatMap((c: any) => (c.messages ?? []).map((m: any) => m.imageUrl)),
+  ].filter((u): u is string => !!u);
+
+  // 刪圖失敗不擋帳號刪除 —— 使用者的刪除請求優先於清理的完整性
+  await Promise.all(imageUrls.map((u) => deleteImageByUrl(u).catch(() => {})));
 
   await Promise.all([
     WeightLog.deleteMany({ petId: { $in: petIds } }),

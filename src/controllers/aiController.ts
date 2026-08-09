@@ -8,7 +8,7 @@ import WeightLog from '../models/WeightLog';
 import PetLog from '../models/PetLog';
 import CalendarEvent from '../models/CalendarEvent';
 import VetVisit from '../models/VetVisit';
-import { uploadImage } from '../utils/cloudinary';
+import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
 import { searchKnowledgeBase } from '../utils/knowledgeSearch';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -472,5 +472,12 @@ export async function deleteConversation(req: AuthRequest, res: Response): Promi
     res.status(404).json({ success: false, data: null, message: '找不到對話' });
     return;
   }
+
+  // 對話裡使用者上傳的圖也要一起刪，否則會永遠留在 Cloudinary 且再也對應不回來
+  const urls = (conv.messages ?? [])
+    .map((m) => m.imageUrl)
+    .filter((u): u is string => !!u);
+  await Promise.all(urls.map((u) => deleteImageByUrl(u).catch(() => {})));
+
   res.json({ success: true, data: null, message: '對話已刪除' });
 }

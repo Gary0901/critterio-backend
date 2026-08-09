@@ -145,7 +145,12 @@ export async function updatePet(req: AuthRequest, res: Response): Promise<void> 
   if (req.body.birthday)       updates.birthday       = new Date(req.body.birthday);
   if (req.body.joinedFamilyAt) updates.joinedFamilyAt = new Date(req.body.joinedFamilyAt);
   if (req.file) {
+    // 換照片時要把舊的刪掉，否則 Cloudinary 會累積沒人引用的圖。
+    // 先查舊值再上傳，刪除失敗不擋流程。
+    const prev = await Pet.findOne({ _id: req.params.id, userId: req.userId }).select('photoUrl').lean();
     updates.photoUrl = await uploadImage(req.file.buffer, 'critterio/pets');
+    const oldUrl = (prev as any)?.photoUrl;
+    if (oldUrl) await deleteImageByUrl(oldUrl).catch(() => {});
   }
 
   // multipart 的欄位一律是字串，不能直接用 typeof 判斷
@@ -359,5 +364,10 @@ export async function deletePetLog(req: AuthRequest, res: Response): Promise<voi
     res.status(404).json({ success: false, data: null, message: '找不到日誌' });
     return;
   }
+
+  // 刪掉這篇日誌的圖片。刪除寵物那條路徑本來就有清，單篇刪除漏了。
+  const urls = (log.images ?? []).map((img: any) => img.url).filter(Boolean);
+  await Promise.all(urls.map((url: string) => deleteImageByUrl(url).catch(() => {})));
+
   res.json({ success: true, data: null, message: '日誌已刪除' });
 }
