@@ -139,6 +139,37 @@ const KNOWLEDGE_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   },
 ];
 
+/**
+ * 交給模型的日期一律先轉成使用者所在時區的字串，不要直接丟 Date。
+ *
+ * Date 被序列化成 JSON 會變成 UTC 的 ISO 字串（例如 2026-07-31T16:00:00.000Z），
+ * 模型讀日期部分就會少一天——就醫紀錄的 visitDate 存的是「本機午夜」轉 UTC，
+ * 在 UTC+8 正好會退回前一天下午。使用者看到 08/01，AI 卻回答 07/31。
+ *
+ * 後端不能用 getFullYear() 那套（伺服器跑在 UTC，拿到的會是 UTC 的值），
+ * 必須明確指定時區。
+ */
+const APP_TIME_ZONE = 'Asia/Taipei';
+
+function toLocalDate(d?: Date | string | null): string {
+  if (!d) return '';
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return '';
+  // en-CA 的格式剛好是 YYYY-MM-DD
+  return date.toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
+}
+
+function toLocalDateTime(d?: Date | string | null): string {
+  if (!d) return '';
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return '';
+  const day = date.toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
+  const time = date.toLocaleTimeString('en-GB', {
+    timeZone: APP_TIME_ZONE, hour: '2-digit', minute: '2-digit',
+  });
+  return `${day} ${time}`;
+}
+
 async function executeTool(
   name: string,
   args: Record<string, unknown>,
@@ -148,7 +179,7 @@ async function executeTool(
     case 'get_weight_history': {
       const limit = Math.min(Number(args.limit) || 10, 30);
       const logs = await WeightLog.find({ petId }).sort({ recordedAt: -1 }).limit(limit).lean();
-      return logs.map(l => ({ weightKg: l.weightKg, recordedAt: l.recordedAt }));
+      return logs.map(l => ({ weightKg: l.weightKg, recordedAt: toLocalDate(l.recordedAt) }));
     }
     case 'get_daily_logs': {
       const days = Math.min(Number(args.days) || 14, 60);
@@ -157,7 +188,7 @@ async function executeTool(
         .sort({ date: -1 })
         .limit(30)
         .lean();
-      return logs.map(l => ({ date: l.date, title: l.title, content: l.content, mood: l.mood, hashtags: l.hashtags }));
+      return logs.map(l => ({ date: toLocalDate(l.date), title: l.title, content: l.content, mood: l.mood, hashtags: l.hashtags }));
     }
     case 'get_calendar_events': {
       const days = Math.min(Number(args.days) || 30, 90);
@@ -169,13 +200,13 @@ async function executeTool(
       else if (scope === 'past') filter.startTime = { $gte: new Date(now - days * dayMs), $lte: new Date(now) };
       else filter.startTime = { $gte: new Date(now - days * dayMs), $lte: new Date(now + days * dayMs) };
       const events = await CalendarEvent.find(filter).sort({ startTime: 1 }).limit(30).lean();
-      return events.map(e => ({ title: e.title, type: e.type, startTime: e.startTime, done: e.done, note: e.note }));
+      return events.map(e => ({ title: e.title, type: e.type, startTime: toLocalDateTime(e.startTime), done: e.done, note: e.note }));
     }
     case 'get_vet_visit_history': {
       const limit = Math.min(Number(args.limit) || 5, 20);
       const results = await VetVisit.find({ petId }).sort({ visitDate: -1 }).limit(limit).lean();
       return results.map(r => ({
-        visitDate: r.visitDate,
+        visitDate: toLocalDate(r.visitDate),
         clinicName: r.clinicName,
         diagnosisNote: r.diagnosisNote,
         medications: r.medications,
