@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { Resend } from 'resend';
 import { OAuth2Client } from 'google-auth-library';
+import jwksClient from 'jwks-rsa';
 import User from '../models/User';
 import Pet from '../models/Pet';
 import WeightLog from '../models/WeightLog';
@@ -28,6 +29,56 @@ const GOOGLE_CLIENT_IDS = (process.env.GOOGLE_OAUTH_CLIENT_IDS ?? '')
   .map((s) => s.trim())
   .filter(Boolean);
 const googleClient = new OAuth2Client();
+
+// ─── Sign in with Apple ───────────────────────────────────────────────────────
+// Apple 的 identityToken 是它自己簽的 JWT，公鑰放在下面這個 JWKS 端點、且會輪替，
+// 所以不能寫死金鑰，要用 jwks-rsa 依 token 標頭的 kid 動態取得（內建快取）。
+const APPLE_ISSUER = 'https://appleid.apple.com';
+const appleKeys = jwksClient({
+  jwksUri: `${APPLE_ISSUER}/auth/keys`,
+  cache: true,
+  cacheMaxAge: 24 * 60 * 60 * 1000,
+  rateLimit: true,
+});
+
+// aud 必須等於 App 的 bundle identifier。設成環境變數是為了讓之後
+// 多一個 target（例如 watchOS）或改 bundle id 時不用動程式碼
+const APPLE_AUDIENCES = (process.env.APPLE_CLIENT_IDS ?? 'com.critterio.app')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function getAppleSigningKey(header: jwt.JwtHeader, callback: jwt.SigningKeyCallback): void {
+  appleKeys.getSigningKey(header.kid, (err, key) => {
+    if (err || !key) return callback(err ?? new Error('找不到 Apple 簽章金鑰'));
+    callback(null, key.getPublicKey());
+  });
+}
+
+function verifyAppleIdentityToken(identityToken: string): Promise<jwt.JwtPayload> {
+  return new Promise((resolve, reject) => {
+    if (APPLE_AUDIENCES.length === 0) {
+      // 設定成空字串等於不驗 aud，任何 App 簽出來的 token 都會通過——不能放行
+      return reject(new Error('APPLE_CLIENT_IDS 未設定'));
+    }
+    jwt.verify(
+      identityToken,
+      getAppleSigningKey,
+      {
+        algorithms: ['RS256'],
+        issuer: APPLE_ISSUER,
+        // jsonwebtoken 的型別要求非空 tuple，上面已確保長度 > 0
+        audience: APPLE_AUDIENCES as [string, ...string[]],
+      },
+      (err: jwt.VerifyErrors | null, decoded: jwt.JwtPayload | string | undefined) => {
+        if (err || !decoded || typeof decoded === 'string') {
+          return reject(err ?? new Error('Apple token 格式不正確'));
+        }
+        resolve(decoded);
+      }
+    );
+  });
+}
 
 function signToken(userId: string): string {
   return jwt.sign({ userId }, process.env.JWT_SECRET!, {
@@ -160,6 +211,63 @@ export async function googleLogin(req: Request, res: Response): Promise<void> {
       authProviders: { googleId },
       profile: { name },
     });
+  }
+
+  const token = signToken(String(user._id));
+  res.json({ success: true, data: { token, user: formatUser(user) }, message: '登入成功' });
+}
+
+export async function appleLogin(req: Request, res: Response): Promise<void> {
+  // fullName 只有「第一次授權」時 Apple 才會給，而且只給客戶端、不在 token 裡。
+  // 之後再登入就永遠拿不到了，所以前端必須把第一次拿到的名字一起送上來。
+  const { identityToken, fullName } = req.body as { identityToken?: string; fullName?: string };
+  if (!identityToken) {
+    res.status(400).json({ success: false, data: null, message: 'identityToken 為必填' });
+    return;
+  }
+
+  let payload: jwt.JwtPayload;
+  try {
+    payload = await verifyAppleIdentityToken(identityToken);
+  } catch {
+    res.status(401).json({ success: false, data: null, message: 'Apple 驗證失敗' });
+    return;
+  }
+
+  const appleId = payload.sub;
+  if (!appleId) {
+    res.status(401).json({ success: false, data: null, message: 'Apple 驗證失敗' });
+    return;
+  }
+
+  // 使用者可以選「隱藏我的電子郵件」，這時 email 會是 @privaterelay.appleid.com 的轉發位址。
+  // 那仍然是可寄信的有效地址，照常收下即可。
+  // 也可能完全沒有 email（極少數情況），所以不能像 Google 那樣把 email 當必要條件。
+  const email = typeof payload.email === 'string' ? payload.email.toLowerCase() : undefined;
+
+  let user = await User.findOne({ 'authProviders.appleId': appleId });
+
+  if (!user && email) {
+    // 同一個 Email 若已用密碼或 Google 註冊過，連結到既有帳號，不要產生重複帳號
+    user = await User.findOne({ email });
+    if (user) {
+      user.authProviders.appleId = appleId;
+      await user.save();
+    }
+  }
+
+  if (!user) {
+    user = await User.create({
+      email,
+      authProviders: { appleId },
+      // 沒有 fullName 又沒有 email 時（使用者隱藏了 email 且不是第一次授權），
+      // 至少給一個可讀的預設名稱，之後可以在個人資料頁改
+      profile: { name: fullName?.trim() || email?.split('@')[0] || '毛孩飼主' },
+    });
+  } else if (fullName?.trim() && !user.profile.name) {
+    // 既有帳號沒有名字時才補，不要覆蓋使用者自己設定過的暱稱
+    user.profile.name = fullName.trim();
+    await user.save();
   }
 
   const token = signToken(String(user._id));

@@ -13,16 +13,35 @@ const REPORT_HIDE_THRESHOLD = 5;
 const POST_TYPES = ['question', 'meetup', 'share'] as const;
 type PostType = typeof POST_TYPES[number];
 
-async function populateUser(userId: any) {
-  const user = await User.findById(userId).lean();
+function shapeUser(userId: any, user: any) {
   if (!user) return { id: userId, name: '未知用戶', avatarUrl: null, avatarColor: null };
   return {
     id: user._id,
-    name: (user as any).profile.name,
-    avatarUrl: (user as any).profile.avatarUrl ?? null,
+    name: user.profile.name,
+    avatarUrl: user.profile.avatarUrl ?? null,
     // 沒上傳照片時前端要拿這個畫圓圈底色，不給的話別人看到的顏色會跟本人選的不一樣
-    avatarColor: (user as any).profile.avatarColor ?? null,
+    avatarColor: user.profile.avatarColor ?? null,
   };
+}
+
+/** 熱門排序只考慮這個天數內的貼文，見 getPosts 裡的說明 */
+const HOT_WINDOW_DAYS = 14;
+
+async function populateUser(userId: any) {
+  const user = await User.findById(userId).lean();
+  return shapeUser(userId, user);
+}
+
+/**
+ * 批次版：一次撈完整批作者再組 Map。
+ * 清單類的端點務必用這個——在 map() 裡逐筆 await populateUser 是 N+1，
+ * 一頁 10 筆貼文就等於 10 次額外往返，留言多的貼文更嚴重。
+ */
+async function populateUsers(userIds: any[]) {
+  const uniqueIds = Array.from(new Set(userIds.map(String)));
+  const users = await User.find({ _id: { $in: uniqueIds } }).lean();
+  const byId = new Map(users.map((u: any) => [String(u._id), u]));
+  return (userId: any) => shapeUser(userId, byId.get(String(userId)));
 }
 
 // ─── Posts ────────────────────────────────────────────────────────────────────
@@ -99,7 +118,15 @@ export async function getPosts(req: AuthRequest, res: Response): Promise<void> {
     // +1 確保新文有基礎分，gravity 1.2 讓熱貼約 3 天後沉降
     const now = new Date();
     posts = await Post.aggregate([
-      { $match: filter },
+      // 只排最近 HOT_WINDOW_DAYS 天的貼文。hotScore 是計算欄位、無法建索引，
+      // 不設窗的話每次熱門查詢都要掃全表逐筆算分再在記憶體排序，會隨資料量線性惡化
+      // （MongoDB 記憶體排序還有 100MB 上限）。加了 createdAt 範圍才吃得到
+      // { status: 1, createdAt: -1 } 這個既有索引。
+      //
+      // 14 天是照公式推的：一篇 14 天前、100 讚 50 留言的貼文分數約 0.32，
+      // 已經低於一篇全新零互動貼文的 0.435——本來就排不上來，掃它純屬浪費。
+      // 代價是極少數的爆紅老文（上千讚）會被排除在外。
+      { $match: { ...filter, createdAt: { $gte: new Date(now.getTime() - HOT_WINDOW_DAYS * 864e5) } } },
       {
         $addFields: {
           hotScore: {
@@ -137,20 +164,19 @@ export async function getPosts(req: AuthRequest, res: Response): Promise<void> {
   const myLikes = await PostLike.find({ postId: { $in: postIds }, userId: req.userId }).lean();
   const likedSet = new Set(myLikes.map((l) => String(l.postId)));
 
-  const data = await Promise.all(
-    posts.map(async (p) => ({
-      id: p._id,
-      content: p.content,
-      images: p.images,
-      hashtags: p.hashtags ?? [],
-      withPets: p.withPets ?? [],
-      postType: p.postType ?? 'share',
-      metrics: p.metrics,
-      isLiked: likedSet.has(String(p._id)),
-      createdAt: p.createdAt,
-      user: await populateUser(p.userId),
-    }))
-  );
+  const userOf = await populateUsers(posts.map((p) => p.userId));
+  const data = posts.map((p) => ({
+    id: p._id,
+    content: p.content,
+    images: p.images,
+    hashtags: p.hashtags ?? [],
+    withPets: p.withPets ?? [],
+    postType: p.postType ?? 'share',
+    metrics: p.metrics,
+    isLiked: likedSet.has(String(p._id)),
+    createdAt: p.createdAt,
+    user: userOf(p.userId),
+  }));
   res.json({ success: true, data, message: '' });
 }
 
@@ -179,9 +205,10 @@ export async function getPost(req: AuthRequest, res: Response): Promise<void> {
       .sort({ createdAt: 1 })
       .lean(),
   ]);
-  const commentsWithUser = await Promise.all(
-    comments.map(async (c) => ({ id: c._id, content: c.content, createdAt: c.createdAt, user: await populateUser(c.userId) }))
-  );
+  const commentAuthorOf = await populateUsers(comments.map((c) => c.userId));
+  const commentsWithUser = comments.map((c) => ({
+    id: c._id, content: c.content, createdAt: c.createdAt, user: commentAuthorOf(c.userId),
+  }));
   res.json({
     success: true,
     data: {
