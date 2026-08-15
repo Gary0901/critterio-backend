@@ -205,16 +205,20 @@ export async function googleLogin(req: Request, res: Response): Promise<void> {
     }
   }
 
+  // 社群登入不分「登入 / 註冊」兩個入口，同一顆按鈕可能建立新帳號。
+  // 前端要靠這個旗標決定是進主畫面還是先走新增寵物的引導流程。
+  let isNewUser = false;
   if (!user) {
     user = await User.create({
       email,
       authProviders: { googleId },
       profile: { name },
     });
+    isNewUser = true;
   }
 
   const token = signToken(String(user._id));
-  res.json({ success: true, data: { token, user: formatUser(user) }, message: '登入成功' });
+  res.json({ success: true, data: { token, user: formatUser(user), isNewUser }, message: '登入成功' });
 }
 
 export async function appleLogin(req: Request, res: Response): Promise<void> {
@@ -256,6 +260,7 @@ export async function appleLogin(req: Request, res: Response): Promise<void> {
     }
   }
 
+  let isNewUser = false;
   if (!user) {
     user = await User.create({
       email,
@@ -264,6 +269,7 @@ export async function appleLogin(req: Request, res: Response): Promise<void> {
       // 至少給一個可讀的預設名稱，之後可以在個人資料頁改
       profile: { name: fullName?.trim() || email?.split('@')[0] || '毛孩飼主' },
     });
+    isNewUser = true;
   } else if (fullName?.trim() && !user.profile.name) {
     // 既有帳號沒有名字時才補，不要覆蓋使用者自己設定過的暱稱
     user.profile.name = fullName.trim();
@@ -271,7 +277,7 @@ export async function appleLogin(req: Request, res: Response): Promise<void> {
   }
 
   const token = signToken(String(user._id));
-  res.json({ success: true, data: { token, user: formatUser(user) }, message: '登入成功' });
+  res.json({ success: true, data: { token, user: formatUser(user), isNewUser }, message: '登入成功' });
 }
 
 export async function getMe(req: AuthRequest, res: Response): Promise<void> {
