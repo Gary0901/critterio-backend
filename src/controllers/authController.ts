@@ -18,8 +18,11 @@ import CalendarEvent from '../models/CalendarEvent';
 import AiConversation from '../models/AiConversation';
 import Notification from '../models/Notification';
 import VetVisit from '../models/VetVisit';
+import VisitParseJob from '../models/VisitParseJob';
+import UserBlock from '../models/UserBlock';
 import { AuthRequest } from '../middleware/auth';
 import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
+import { exchangeAppleAuthCode, revokeAppleToken } from '../utils/appleAuth';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -224,7 +227,11 @@ export async function googleLogin(req: Request, res: Response): Promise<void> {
 export async function appleLogin(req: Request, res: Response): Promise<void> {
   // fullName 只有「第一次授權」時 Apple 才會給，而且只給客戶端、不在 token 裡。
   // 之後再登入就永遠拿不到了，所以前端必須把第一次拿到的名字一起送上來。
-  const { identityToken, fullName } = req.body as { identityToken?: string; fullName?: string };
+  const { identityToken, fullName, authorizationCode } = req.body as {
+    identityToken?: string;
+    fullName?: string;
+    authorizationCode?: string;
+  };
   if (!identityToken) {
     res.status(400).json({ success: false, data: null, message: 'identityToken 為必填' });
     return;
@@ -274,6 +281,16 @@ export async function appleLogin(req: Request, res: Response): Promise<void> {
     // 既有帳號沒有名字時才補，不要覆蓋使用者自己設定過的暱稱
     user.profile.name = fullName.trim();
     await user.save();
+  }
+
+  // authorizationCode 只能用一次、幾分鐘就過期，所以每次登入都趁現在換成 refresh_token。
+  // 這是刪除帳號時撤銷 Apple 授權的唯一憑據（審核指南 5.1.1(v)）。
+  if (authorizationCode) {
+    const refreshToken = await exchangeAppleAuthCode(authorizationCode);
+    if (refreshToken) {
+      user.authProviders.appleRefreshToken = refreshToken;
+      await user.save();
+    }
   }
 
   const token = signToken(String(user._id));
@@ -526,8 +543,16 @@ export async function deleteAccount(req: AuthRequest, res: Response): Promise<vo
     Post.find({ userId }).select('images').lean(),
     VetVisit.find({ petId: { $in: petIds } }).select('imageUrl').lean(),
     AiConversation.find({ userId }).select('messages.imageUrl').lean(),
-    User.findById(userId).select('profile.avatarUrl').lean(),
+    User.findById(userId).select('profile.avatarUrl authProviders.appleRefreshToken').lean(),
   ]);
+
+  // 審核指南 5.1.1(v)：用 Apple 登入的帳號被刪除時必須撤銷授權，
+  // 否則 Critterio 會一直留在使用者「設定 → 使用 Apple 帳號登入」的清單裡。
+  // 撤銷失敗不擋刪除 —— 使用者的刪除請求優先。
+  const appleRefreshToken = (userDoc as any)?.authProviders?.appleRefreshToken;
+  if (appleRefreshToken) {
+    await revokeAppleToken(appleRefreshToken);
+  }
 
   const imageUrls: string[] = [
     (userDoc as any)?.profile?.avatarUrl,
@@ -544,7 +569,11 @@ export async function deleteAccount(req: AuthRequest, res: Response): Promise<vo
   await Promise.all([
     WeightLog.deleteMany({ petId: { $in: petIds } }),
     PetLog.deleteMany({ petId: { $in: petIds } }),
+    VetVisit.deleteMany({ petId: { $in: petIds } }),
+    VisitParseJob.deleteMany({ userId }),
     Pet.deleteMany({ userId }),
+    // 封鎖是雙向的，兩邊都要清掉，否則對方會被一個已不存在的帳號永久封鎖
+    UserBlock.deleteMany({ $or: [{ blockerId: userId }, { blockedId: userId }] }),
     Comment.deleteMany({ $or: [{ postId: { $in: postIds } }, { userId }] }),
     PostLike.deleteMany({ $or: [{ postId: { $in: postIds } }, { userId }] }),
     PostReport.deleteMany({ $or: [{ postId: { $in: postIds } }, { userId }] }),

@@ -8,6 +8,11 @@ export interface IUser extends Document {
   authProviders: {
     googleId?: string;
     appleId?: string;
+    /**
+     * 刪除帳號時要拿它去呼叫 Apple 的 /auth/revoke（審核指南 5.1.1(v) 要求）。
+     * 只在後端用，formatUser 不會回傳。
+     */
+    appleRefreshToken?: string;
   };
   profile: {
     name: string;
@@ -46,6 +51,7 @@ const UserSchema = new Schema<IUser>(
     authProviders: {
       googleId: { type: String, sparse: true, unique: true },
       appleId:  { type: String, sparse: true, unique: true },
+      appleRefreshToken: { type: String },
     },
     profile: {
       name: { type: String, required: true },
