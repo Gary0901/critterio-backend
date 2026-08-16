@@ -2,6 +2,8 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import Notification from '../models/Notification';
 
+const APP_TIME_ZONE = 'Asia/Taipei';
+
 function formatTimeAgo(date: Date): string {
   const diff = Date.now() - date.getTime();
   const mins = Math.floor(diff / 60_000);
@@ -11,16 +13,32 @@ function formatTimeAgo(date: Date): string {
   if (hrs < 24) return `${hrs} 小時前`;
   const days = Math.floor(hrs / 24);
   if (days < 7) return `${days} 天前`;
-  return date.toLocaleDateString('zh-TW');
+  return date.toLocaleDateString('zh-TW', { timeZone: APP_TIME_ZONE });
 }
 
-function dayGroup(date: Date): 'today' | 'yesterday' | 'earlier' {
-  const now = new Date();
-  const d = new Date(date);
-  if (d.toDateString() === now.toDateString()) return 'today';
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return 'yesterday';
+// 用台北當地日期字串（YYYY-MM-DD）比較，不要用 Date 物件的 toDateString()——
+// 伺服器跑在 UTC，凌晨 0-8 點時 toDateString() 會整組算成前一天
+function taipeiDateStr(d: Date): string {
+  return d.toLocaleDateString('en-CA', { timeZone: APP_TIME_ZONE });
+}
+
+// 用純日期字串重建一個 UTC 午夜的 Date 只為了算「星期幾」——
+// 這個算法不受伺服器時區影響，因為輸入已經是不含時區資訊的日曆日期
+function weekdayOf(dateStr: string): number {
+  return new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+}
+
+function dayGroup(date: Date): 'today' | 'thisWeek' | 'earlier' {
+  const todayStr = taipeiDateStr(new Date());
+  const dStr = taipeiDateStr(date);
+  if (dStr === todayStr) return 'today';
+
+  // 本週起點：往前推到本週日（跟前端 DailyLogScreen 的週起點算法一致，週日為一週的第 0 天）
+  const weekStart = new Date(`${todayStr}T00:00:00Z`);
+  weekStart.setUTCDate(weekStart.getUTCDate() - weekdayOf(todayStr));
+  const weekStartStr = weekStart.toISOString().slice(0, 10);
+
+  if (dStr >= weekStartStr) return 'thisWeek';
   return 'earlier';
 }
 

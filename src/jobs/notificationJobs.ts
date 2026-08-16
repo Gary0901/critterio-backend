@@ -161,6 +161,10 @@ function scheduleDailyMilestones() {
   }, { timezone: TZ });
 }
 
+// 體重提醒的最小間隔——沒有這個的話，寵物只要一直沒補記錄，
+// 每天 09:00 都會再收到一則一模一樣的提醒，累積得非常快
+const WEIGHT_REMINDER_COOLDOWN_DAYS = 3;
+
 // ─── 3. 每天 20:00 — 今日日誌提醒（當天還沒有任何寵物記錄才推）──────────────
 function scheduleDailyLogReminder() {
   cron.schedule('0 20 * * *', async () => {
@@ -183,21 +187,33 @@ function scheduleDailyLogReminder() {
       });
       if (hasLog) continue;
 
+      // 這支排程一天只跑一次，理論上不會重複，但仍加一道保險——
+      // 避免伺服器重啟、cron 重疊等情況下同一天發出兩則一樣的提醒
+      const alreadySentToday = await Notification.findOne({
+        userId,
+        type: 'health_reminder',
+        'data.kind': 'daily_log_reminder',
+        createdAt: { $gte: startOfDay },
+      }).lean();
+      if (alreadySentToday) continue;
+
       await sendNotification({
         recipientUserId: userId,
         type: 'health_reminder',
         title: '📔 今天還沒記錄喔！',
         body: '花幾分鐘記下毛孩今天的點點滴滴，讓回憶更完整 🐾',
+        data: { kind: 'daily_log_reminder' },
         notifCategory: 'dailyCare',
       });
     }
   }, { timezone: TZ });
 }
 
-// ─── 4. 每天 09:00 — 體重記錄提醒（7 天沒記錄才推）────────────────────────────
+// ─── 4. 每天 09:00 — 體重記錄提醒（7 天沒記錄才推，最短每 3 天才會再提醒一次）───
 function scheduleWeightReminder() {
   cron.schedule('0 9 * * *', async () => {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const cooldownSince = new Date(Date.now() - WEIGHT_REMINDER_COOLDOWN_DAYS * 24 * 60 * 60 * 1000);
 
     const pets = await Pet.find({}).select('userId _id name').lean();
     const userPets = new Map<string, { id: string; name: string }[]>();
@@ -215,12 +231,23 @@ function scheduleWeightReminder() {
         });
         if (recent) continue;
 
+        // 還沒補記錄不代表要天天催——同一隻寵物在冷卻期內已經提醒過就跳過，
+        // 等冷卻期過了才會再提醒一次，而不是每天 09:00 都收到同一則通知
+        const remindedRecently = await Notification.findOne({
+          userId,
+          type: 'health_reminder',
+          'data.petId': pet.id,
+          'data.kind': 'weight_reminder',
+          createdAt: { $gte: cooldownSince },
+        }).lean();
+        if (remindedRecently) continue;
+
         await sendNotification({
           recipientUserId: userId,
           type: 'health_reminder',
           title: `⚖️ ${pet.name} 的體重該記錄了`,
           body: `已超過 7 天沒有記錄 ${pet.name} 的體重，定期追蹤有助於健康管理！`,
-          data: { petId: pet.id },
+          data: { petId: pet.id, kind: 'weight_reminder' },
           notifCategory: 'dailyCare',
         });
       }
