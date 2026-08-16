@@ -73,6 +73,41 @@ const TERMS_SECTIONS: Section[] = [
   },
 ];
 
+/**
+ * App Store Connect 的「支援 URL」是必填欄位，Apple 要求使用者能透過它聯絡到開發者。
+ * 直接掛在既有的公開頁網域下，跟隱私政策、服務條款同一套版型。
+ */
+const SUPPORT_SECTIONS: Section[] = [
+  {
+    title: '聯絡我們',
+    body: '有任何問題、建議或想回報的狀況，都歡迎來信：\n\ncritterioyourpets@gmail.com\n\n我們會盡快回覆。來信時如果能附上您使用的 iPhone 型號、iOS 版本與 App 版本，會幫助我們更快找到問題。',
+  },
+  {
+    title: '常見問題',
+    body: '',
+  },
+  {
+    title: '忘記密碼怎麼辦？',
+    body: '在登入畫面點「忘記密碼？」，輸入註冊時的電子郵件，我們會寄一封重設連結給您。連結有效時間為 1 小時，且只能使用一次。\n\n如果沒收到信，請先檢查垃圾郵件匣。若使用 Google 或 Apple 登入註冊，請直接用原本的方式登入，不需要密碼。',
+  },
+  {
+    title: '如何刪除帳號？',
+    body: '在 App 內前往「設定 → 隱私與安全 → 刪除帳號」即可自行刪除，不需要來信申請。\n\n刪除後，您的寵物資料、日誌、社群貼文、就醫紀錄與上傳的照片都會立即永久移除，無法復原。若您是使用 Apple 帳號登入，我們也會一併撤銷授權。',
+  },
+  {
+    title: 'AI 助理的建議可以相信嗎？',
+    body: 'AI 助理提供的內容僅供參考，不能取代獸醫的專業診斷。它可以幫您整理資訊、提供方向，但毛孩出現緊急或嚴重症狀時，請立即就醫。\n\n檢驗報告的辨識結果也請務必對照紙本核對，數值可以在 App 內自行修改。',
+  },
+  {
+    title: '如何檢舉或封鎖其他使用者？',
+    body: '在任何一篇社群貼文右上角的「⋯」選單中，可以選擇檢舉貼文或封鎖該使用者。\n\n封鎖後雙方都不會再看到彼此的貼文與留言。已封鎖的名單可在「設定 → 隱私與安全 → 已封鎖的使用者」查看與解除。',
+  },
+  {
+    title: '為什麼地圖上找不到我家附近的店家？',
+    body: '地圖目前收錄的是台灣的動物醫院、寵物用品店、美容店與公園。資料來源可能有遺漏或過期，如果您發現缺少或資訊有誤的店家，歡迎來信告訴我們。',
+  },
+];
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -83,10 +118,12 @@ function escapeHtml(s: string): string {
 function renderPage(title: string, sections: Section[]): string {
   const sectionsHtml = sections
     .map(
+      // body 留空時只出標題，讓它單純當分隔用的小標，不要留一個空段落
       (s) => `
       <section>
-        <h2>${escapeHtml(s.title)}</h2>
-        <p>${escapeHtml(s.body).replace(/\n/g, '<br/>')}</p>
+        <h2>${escapeHtml(s.title)}</h2>${
+        s.body ? `\n        <p>${escapeHtml(s.body).replace(/\n/g, '<br/>')}</p>` : ''
+      }
       </section>`
     )
     .join('\n');
@@ -120,6 +157,10 @@ router.get('/privacy', (_req, res) => {
 
 router.get('/terms', (_req, res) => {
   res.type('html').send(renderPage('服務條款', TERMS_SECTIONS));
+});
+
+router.get('/support', (_req, res) => {
+  res.type('html').send(renderPage('支援與常見問題', SUPPORT_SECTIONS));
 });
 
 export default router;
