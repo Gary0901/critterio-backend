@@ -156,7 +156,12 @@ requirements:
     model: 'openai/gpt-oss-120b',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
-    max_tokens: 1024,
+    // ⚠️ openai/gpt-oss-120b 是推理模型，回答前會先生成一段看不見的「思考」內容，
+    // 這段一樣算進 max_tokens。實測思考長度不固定（同一份 prompt 連續呼叫，
+    // reasoning_tokens 從 397 到 990 都有），1024 太緊，思考一長就會把 JSON
+    // 答案硬生生切斷，導致 JSON.parse 丟出 "Unexpected end of JSON input"。
+    // 拉高上限只是提高天花板、按實際用量計費，開大不會增加成本
+    max_tokens: 3072,
   });
 
   const text = completion.choices[0]?.message?.content?.trim() ?? '';
