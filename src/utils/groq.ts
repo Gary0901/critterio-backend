@@ -151,7 +151,9 @@ requirements:
   }
 
   const completion = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
+    // Groq 已下架 llama-3.3-70b-versatile（2026-08-17 發現，打過去回 model_not_found）。
+    // openai/gpt-oss-120b 是目前 Groq 上功能相近的替代品，繁中 JSON 輸出測過沒問題。
+    model: 'openai/gpt-oss-120b',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
     max_tokens: 1024,
