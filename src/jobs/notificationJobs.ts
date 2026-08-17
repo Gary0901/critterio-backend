@@ -25,11 +25,14 @@ const TYPE_LABEL: Record<string, string> = {
   other:    '行程',
 };
 
-// ─── 1a. 一般事件：每 15 分鐘掃，開始前 1 小時推（跳過全天事件）──────────────
+// ─── 1a. 一般事件：每 15 分鐘掃，開始前約 50-65 分鐘推（跳過全天事件）──────────
 function scheduleCalendarReminders() {
   cron.schedule('*/15 * * * *', async () => {
     const now = new Date();
-    const windowStart = new Date(now.getTime() + 55 * 60 * 1000);
+    // 窗口寬度必須 >= 15 分鐘（掃描間隔），不然會有事件時間卡在兩次掃描中間、
+    // 永遠掃不到。原本 55-65（只有 10 分鐘寬）就是這樣：事件開始時間分鐘數落在
+    // 06/07/08/09（以及每 15 分循環一次）會完全收不到提醒，不是時間偏差，是漏推
+    const windowStart = new Date(now.getTime() + 50 * 60 * 1000);
     const windowEnd   = new Date(now.getTime() + 65 * 60 * 1000);
 
     const events = await CalendarEvent.find({

@@ -37,7 +37,9 @@ export async function sendNotification(opts: SendOptions): Promise<void> {
     sound: 'default',
     title,
     body,
-    data: data ?? {},
+    // type 原本沒有放進推播的 data 裡（只存在應用內的 Notification 紀錄）。
+    // 點系統推播橫幅時前端要靠它判斷該跳去哪一頁，沒有這欄就無從判斷
+    data: { ...(data ?? {}), type },
   };
 
   try {
