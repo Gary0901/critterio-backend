@@ -230,6 +230,19 @@ export async function getPost(req: AuthRequest, res: Response): Promise<void> {
  * 裡的舊圖視為被使用者刪除，要連 Cloudinary 一起清掉，不然孤兒圖片會一直堆積。
  */
 export async function updatePost(req: AuthRequest, res: Response): Promise<void> {
+  // Express 4 對 async handler 裡沒接住的例外不會自動回應——不包 try/catch
+  // 的話，一旦中途炸掉，前端只會看到請求卡住不動，永遠等不到任何回應
+  try {
+    await doUpdatePost(req, res);
+  } catch (e) {
+    console.error(`[updatePost] 未預期的錯誤，postId=${req.params.id}`, e);
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, data: null, message: '更新失敗，請稍後再試' });
+    }
+  }
+}
+
+async function doUpdatePost(req: AuthRequest, res: Response): Promise<void> {
   const post = await Post.findOne({ _id: req.params.id, userId: req.userId });
   if (!post) {
     res.status(404).json({ success: false, data: null, message: '找不到貼文或無權限編輯' });
@@ -238,6 +251,8 @@ export async function updatePost(req: AuthRequest, res: Response): Promise<void>
 
   const { content, postType: postTypeRaw, hashtags: hashtagsRaw, withPets: withPetsRaw, existingImages: existingImagesRaw } = req.body;
   const files = (req.files ?? []) as Express.Multer.File[];
+  // post.images 等一下會被 finalImages 蓋掉，要先留一份原始值才能算出哪些被移除了
+  const originalImages: string[] = [...post.images];
 
   let keptImages: string[] = post.images;
   if (existingImagesRaw !== undefined) {
@@ -269,9 +284,6 @@ export async function updatePost(req: AuthRequest, res: Response): Promise<void>
     return;
   }
 
-  const removedImages = post.images.filter((url) => !keptImages.includes(url));
-  await Promise.all(removedImages.map((url) => deleteImageByUrl(url).catch(() => {})));
-
   if (content !== undefined) post.content = content;
   post.images = finalImages;
   if (POST_TYPES.includes(postTypeRaw)) post.postType = postTypeRaw;
@@ -282,6 +294,15 @@ export async function updatePost(req: AuthRequest, res: Response): Promise<void>
     try { post.withPets = JSON.parse(withPetsRaw); } catch {}
   }
   await post.save();
+
+  // 刪除被換掉的舊圖不影響這次回應的內容（DB 已經存好新的 images 了），
+  // 不等它跑完再回應——換照片時「上傳新圖＋刪除舊圖」兩趟 Cloudinary
+  // 來回序列著等，使用者會覺得存檔卡很久。失敗也只是留下孤兒圖片，
+  // 不影響資料正確性，用 catch 記錄就好
+  const removedImages = originalImages.filter((url) => !keptImages.includes(url));
+  Promise.all(removedImages.map((url: string) => deleteImageByUrl(url).catch((e) =>
+    console.error(`[updatePost] Cloudinary 舊圖刪除失敗，postId=${post._id}`, e)
+  ))).catch(() => {});
 
   const user = await populateUser(req.userId);
   res.json({
