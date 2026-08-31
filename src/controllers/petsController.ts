@@ -172,7 +172,7 @@ function validatePetDates(birthday?: Date | null, joinedFamilyAt?: Date | null):
 
 // ─── Pet CRUD ─────────────────────────────────────────────────────────────────
 
-const FREE_PET_LIMIT = 3;
+const FREE_PET_LIMIT = 5;
 
 export async function createPet(req: AuthRequest, res: Response): Promise<void> {
   const { name, species, breed, birthday, joinedFamilyAt, gender, weight } = req.body;

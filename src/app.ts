@@ -2,6 +2,7 @@ import './instrument';
 import * as Sentry from '@sentry/node';
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { connectDB } from './config/db';
 
 import authRoutes from './routes/auth';
@@ -15,6 +16,7 @@ import usersRoutes from './routes/users';
 import adminRoutes from './routes/admin';
 import legalRoutes from './routes/legal';
 import webRoutes from './routes/web';
+import landingRoutes from './routes/landing';
 import { startNotificationJobs } from './jobs/notificationJobs';
 
 const app = express();
@@ -22,8 +24,13 @@ const app = express();
 app.use(cors({ exposedHeaders: ['RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset'] }));
 app.use(express.json({ limit: '10mb' }));
 
+// landing.ts 用的 App 截圖，dist/ 跟 src/ 對 backend 根目錄的相對深度一樣，
+// 這條路徑在 dev（ts-node 跑 src/）跟 production（跑 dist/）都會指到同一個 public/
+app.use(express.static(path.join(__dirname, '../public')));
+
 app.use('/', legalRoutes);
 app.use('/', webRoutes);
+app.use('/', landingRoutes);
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/pets', petRoutes);
