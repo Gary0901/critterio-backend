@@ -223,6 +223,78 @@ export async function getPost(req: AuthRequest, res: Response): Promise<void> {
   });
 }
 
+/**
+ * 編輯貼文——內容、分類（問題/分享/揪團）、標記寵物都能改，
+ * 照片則是「留下哪些 + 新加哪些」：existingImages 是前端算好還要保留的
+ * 舊網址清單，跟 post.images 取交集擋掉亂塞別人圖片網址；沒出現在交集
+ * 裡的舊圖視為被使用者刪除，要連 Cloudinary 一起清掉，不然孤兒圖片會一直堆積。
+ */
+export async function updatePost(req: AuthRequest, res: Response): Promise<void> {
+  const post = await Post.findOne({ _id: req.params.id, userId: req.userId });
+  if (!post) {
+    res.status(404).json({ success: false, data: null, message: '找不到貼文或無權限編輯' });
+    return;
+  }
+
+  const { content, postType: postTypeRaw, hashtags: hashtagsRaw, withPets: withPetsRaw, existingImages: existingImagesRaw } = req.body;
+  const files = (req.files ?? []) as Express.Multer.File[];
+
+  let keptImages: string[] = post.images;
+  if (existingImagesRaw !== undefined) {
+    try {
+      const parsed = JSON.parse(existingImagesRaw);
+      keptImages = Array.isArray(parsed) ? parsed.filter((url: string) => post.images.includes(url)) : post.images;
+    } catch {
+      keptImages = post.images;
+    }
+  }
+
+  if (keptImages.length + files.length > 5) {
+    res.status(400).json({ success: false, data: null, message: '最多只能有 5 張照片' });
+    return;
+  }
+
+  const newImageUrls = (
+    await Promise.all(
+      files.map(async (file) => {
+        try { return await uploadImage(file.buffer, 'posts'); } catch { return null; }
+      })
+    )
+  ).filter((url): url is string => url !== null);
+
+  const finalImages = [...keptImages, ...newImageUrls];
+  const finalContent = content !== undefined ? content : post.content;
+  if (!finalContent && finalImages.length === 0) {
+    res.status(400).json({ success: false, data: null, message: '請輸入文字或至少上傳一張照片' });
+    return;
+  }
+
+  const removedImages = post.images.filter((url) => !keptImages.includes(url));
+  await Promise.all(removedImages.map((url) => deleteImageByUrl(url).catch(() => {})));
+
+  if (content !== undefined) post.content = content;
+  post.images = finalImages;
+  if (POST_TYPES.includes(postTypeRaw)) post.postType = postTypeRaw;
+  if (hashtagsRaw !== undefined) {
+    try { post.hashtags = JSON.parse(hashtagsRaw); } catch {}
+  }
+  if (withPetsRaw !== undefined) {
+    try { post.withPets = JSON.parse(withPetsRaw); } catch {}
+  }
+  await post.save();
+
+  const user = await populateUser(req.userId);
+  res.json({
+    success: true,
+    data: {
+      id: post._id, content: post.content, images: post.images,
+      hashtags: post.hashtags, withPets: post.withPets, postType: post.postType,
+      metrics: post.metrics, createdAt: post.createdAt, user,
+    },
+    message: '更新成功',
+  });
+}
+
 export async function deletePost(req: AuthRequest, res: Response): Promise<void> {
   const post = await Post.findOneAndDelete({ _id: req.params.id, userId: req.userId });
   if (!post) {
