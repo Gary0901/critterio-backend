@@ -265,13 +265,19 @@ export async function getPet(req: AuthRequest, res: Response): Promise<void> {
 }
 
 export async function updatePet(req: AuthRequest, res: Response): Promise<void> {
-  const allowed = ['name', 'species', 'breed', 'birthday', 'joinedFamilyAt', 'gender', 'weight', 'heightCm', 'traits'];
+  const allowed = ['name', 'species', 'breed', 'gender', 'weight', 'heightCm', 'traits'];
   const updates: Record<string, any> = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
   }
-  if (req.body.birthday)       updates.birthday       = new Date(req.body.birthday);
-  if (req.body.joinedFamilyAt) updates.joinedFamilyAt = new Date(req.body.joinedFamilyAt);
+  // 空字串代表「清成不詳」——不能直接餵給 new Date()（會變成 Invalid Date），
+  // 要先轉成 null，$set 才會正確把欄位清空，而不是拋 CastError 或存進一個壞值
+  if (req.body.birthday !== undefined) {
+    updates.birthday = req.body.birthday ? new Date(req.body.birthday) : null;
+  }
+  if (req.body.joinedFamilyAt !== undefined) {
+    updates.joinedFamilyAt = req.body.joinedFamilyAt ? new Date(req.body.joinedFamilyAt) : null;
+  }
   // 只改其中一個日期時，要跟資料庫現有的另一個一起驗，否則驗不出交叉錯誤
   if (updates.birthday || updates.joinedFamilyAt) {
     const current = await Pet.findOne({ _id: req.params.id, userId: req.userId })
@@ -327,8 +333,10 @@ export async function updatePet(req: AuthRequest, res: Response): Promise<void> 
     res.status(404).json({ success: false, data: null, message: '找不到寵物' });
     return;
   }
-  // 只有日期或名字變了才重建 —— 名字也要，因為事件標題帶了寵物名
-  if (updates.birthday || updates.joinedFamilyAt || updates.name) {
+  // 只有日期或名字變了才重建 —— 名字也要，因為事件標題帶了寵物名。
+  // 用 in 而不是 truthy：清成不詳時 updates.birthday 是 null，truthy 判斷會漏掉，
+  // 已經產生的生日提醒事件就永遠不會被清掉
+  if ('birthday' in updates || 'joinedFamilyAt' in updates || updates.name) {
     await syncPetAnniversaries(pet).catch(() => {});
   }
   res.json({ success: true, data: formatPet(pet), message: '更新成功' });
