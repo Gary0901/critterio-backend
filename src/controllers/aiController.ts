@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import * as Sentry from '@sentry/node';
 import OpenAI from 'openai';
+import Groq from 'groq-sdk';
 import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth';
 import AiConversation from '../models/AiConversation';
@@ -13,6 +14,17 @@ import { uploadImage, deleteImageByUrl } from '../utils/cloudinary';
 import { searchKnowledgeBase } from '../utils/knowledgeSearch';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// OpenAI 掛掉（key 失效／額度用盡／帳號停權）時的備援——只接純文字對話。
+// Groq 上沒有同時支援圖片又支援 function calling 的對應模型，訊息裡只要
+// 帶了圖片就不做容錯，直接讓例外往外拋，走原本「AI 助理暫時無法回應」的錯誤路徑
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const GROQ_FALLBACK_MODEL = 'openai/gpt-oss-120b'; // 跟 utils/groq.ts 的每日照護建議用同一個模型，已驗證過中文輸出穩定
+
+function hasImageContent(messages: OpenAI.Chat.ChatCompletionMessageParam[]): boolean {
+  return messages.some(
+    (m) => Array.isArray(m.content) && m.content.some((part: any) => part?.type === 'image_url'),
+  );
+}
 
 const SYSTEM_PROMPT = `你是 Critterio App 的 AI 寵物健康專家，擁有豐富的獸醫學知識與寵物行為學背景。
 
@@ -236,13 +248,29 @@ async function streamChatCompletion(
   toolCalls: { id: string; name: string; arguments: string }[];
   finishReason: string | null;
 }> {
-  const stream = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    max_tokens: 1024,
-    messages,
-    tools,
-    stream: true,
-  });
+  let stream: AsyncIterable<any>;
+  try {
+    stream = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 1024,
+      messages,
+      tools,
+      stream: true,
+    });
+  } catch (e) {
+    if (hasImageContent(messages)) throw e; // 有圖片就沒有容錯空間，照原本方式報錯
+    console.error('[aiController] OpenAI 呼叫失敗，改用 Groq 頂著', e);
+    Sentry.captureException(e, { tags: { ai_fallback: 'groq' } });
+    stream = await groq.chat.completions.create({
+      model: GROQ_FALLBACK_MODEL,
+      // gpt-oss 是推理模型，回答前的隱藏「思考」內容一樣算進 max_tokens，
+      // 開大一點避免思考一長就把回答硬生生切斷（跟 utils/groq.ts 同樣的教訓）
+      max_tokens: 2048,
+      messages: messages as any,
+      tools: tools as any,
+      stream: true,
+    }) as any;
+  }
 
   let content = '';
   let finishReason: string | null = null;
