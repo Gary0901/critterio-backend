@@ -433,7 +433,10 @@ export async function sendMessage(req: AuthRequest, res: Response): Promise<void
       fullContent = result.content;
       break;
     }
-  } catch {
+  } catch (e) {
+    // 原本這裡完全吞掉錯誤，OpenAI key 失效／帳號停權這類問題只會看到
+    // 使用者端統一的制式訊息，後台什麼線索都留不下，得手動拿 key 去測才查得出來
+    console.error('[aiController] streamChatCompletion 失敗', e);
     res.write(`data: ${JSON.stringify({ error: 'AI 助理暫時無法回應，請稍後再試。' })}\n\n`);
     res.end();
     return;
