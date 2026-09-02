@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import * as Sentry from '@sentry/node';
 import OpenAI from 'openai';
 import mongoose from 'mongoose';
 import { AuthRequest } from '../middleware/auth';
@@ -435,8 +436,11 @@ export async function sendMessage(req: AuthRequest, res: Response): Promise<void
     }
   } catch (e) {
     // 原本這裡完全吞掉錯誤，OpenAI key 失效／帳號停權這類問題只會看到
-    // 使用者端統一的制式訊息，後台什麼線索都留不下，得手動拿 key 去測才查得出來
+    // 使用者端統一的制式訊息，後台什麼線索都留不下，得手動拿 key 去測才查得出來。
+    // 這個 catch 會把例外整個接住、不會再往外拋，Sentry 預設的自動擷取
+    // （靠例外真的往外傳播）看不到這裡發生的事，要手動送一次才會觸發告警
     console.error('[aiController] streamChatCompletion 失敗', e);
+    Sentry.captureException(e);
     res.write(`data: ${JSON.stringify({ error: 'AI 助理暫時無法回應，請稍後再試。' })}\n\n`);
     res.end();
     return;

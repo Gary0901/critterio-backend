@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import * as Sentry from '@sentry/node';
 import OpenAI from 'openai';
 import { AuthRequest } from '../middleware/auth';
 import Pet from '../models/Pet';
@@ -399,6 +400,9 @@ async function runParseJob(
     });
   } catch (e) {
     console.error(`[vetVisitsController] 背景解析失敗，jobId=${jobId}`, e);
+    // 這是背景 job，例外不會往外傳播到 Express，Sentry 的自動擷取看不到，
+    // 手動送一次才能在 OpenAI key／額度出問題時主動收到告警，不用等使用者回報
+    Sentry.captureException(e);
     await VisitParseJob.findByIdAndUpdate(jobId, {
       status: 'failed',
       errorMessage: 'AI 報告解析失敗，請稍後再試。',
