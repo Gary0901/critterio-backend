@@ -18,7 +18,7 @@ const PRIVACY_SECTIONS: Section[] = [
   },
   {
     title: '3. 第三方服務',
-    body: '本服務使用以下第三方服務處理特定功能：\n・OpenAI：提供 AI 問答與就醫報告 AI 解讀等分析功能\n・Groq：提供每日照護建議，並於 OpenAI 服務中斷時作為備援\n・Cloudinary：儲存您上傳的圖片\n・Resend：發送系統郵件（如密碼重設）\n・Google、Apple：提供第三方帳號登入驗證\n・Google Maps Platform：提供地圖上的店家照片\n・Sentry：監控應用程式錯誤，協助我們排查問題\n・Expo：傳送推播通知\n\n上述服務商均有各自的隱私政策，您的資料僅在提供服務所需範圍內共享。',
+    body: '本服務使用以下第三方服務處理特定功能：\n・OpenAI：提供 AI 問答與就醫報告 AI 解讀等分析功能\n・Groq：提供每日照護建議，並於 OpenAI 服務中斷時作為備援\n・Cloudinary：儲存您上傳的圖片\n・Resend：發送系統郵件（如密碼重設）\n・Google、Apple：提供第三方帳號登入驗證\n・Google Maps Platform：提供地圖上的店家照片\n・Google Analytics（Firebase）：收集匿名的功能使用行為，協助我們了解並優化 App 體驗\n・Sentry：監控應用程式錯誤，協助我們排查問題\n・Expo：傳送推播通知\n\n上述服務商均有各自的隱私政策，您的資料僅在提供服務所需範圍內共享。',
   },
   {
     title: '4. 資料安全',
