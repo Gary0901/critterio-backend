@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth';
-import { searchNearby, listPlaces, createPlace, addFavorite, getFavorites, removeFavorite, getPlacePhoto } from '../controllers/mapController';
+import { searchNearby, listPlaces, createPlace, addFavorite, getFavorites, removeFavorite, getPlacePhoto, weatherAt } from '../controllers/mapController';
 
 const router = Router();
 
@@ -11,6 +11,7 @@ router.use(requireAuth);
 
 router.get('/places', searchNearby);
 router.get('/places/list', listPlaces);
+router.get('/weather', weatherAt);
 router.post('/places', createPlace); // admin only
 router.post('/favorites', addFavorite);
 router.get('/favorites', getFavorites);

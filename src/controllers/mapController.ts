@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import Place from '../models/Place';
 import Favorite from '../models/Favorite';
+import { getWeather } from '../utils/weather';
 
 const GOOGLE_KEY = process.env.GOOGLE_GEOCODING_KEY ?? '';
 
@@ -106,6 +107,26 @@ export async function createPlace(req: AuthRequest, res: Response): Promise<void
     location: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
   });
   res.status(201).json({ success: true, data: { id: place._id }, message: '地點建立成功' });
+}
+
+// ─── Weather ──────────────────────────────────────────────────────────────────
+
+/** 地圖左上角天氣圈：回傳該座標的今日天氣（後端已做粗網格 + 25 分鐘快取） */
+export async function weatherAt(req: AuthRequest, res: Response): Promise<void> {
+  const { lat, lng } = req.query as Record<string, string>;
+  const latN = parseFloat(lat);
+  const lngN = parseFloat(lng);
+  if (!lat || !lng || Number.isNaN(latN) || Number.isNaN(lngN)) {
+    res.status(400).json({ success: false, data: null, message: 'lat 與 lng 為必填且需為數字' });
+    return;
+  }
+  try {
+    const data = await getWeather(latN, lngN);
+    res.json({ success: true, data, message: '' });
+  } catch {
+    // 天氣不是關鍵功能。失敗回 502，前端會安靜地把那顆圈隱藏，不干擾地圖
+    res.status(502).json({ success: false, data: null, message: '天氣資料暫時無法取得' });
+  }
 }
 
 // ─── Favorites ────────────────────────────────────────────────────────────────
